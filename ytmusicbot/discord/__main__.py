@@ -34,8 +34,10 @@ from ytmusicbot.discord.logic import (
     dequeue,
     dequeue_next,
     dequeue_previous,
+    dequeue_current,
     stop,
     random_,
+    skip_to,
 )
 
 import os
@@ -383,6 +385,15 @@ async def on_dequeue_previous_cmd(ctx: interactions.SlashContext):
 
 
 @interactions.slash_command(
+    name="dequeue_current",
+    description="Remove the current song from the queue",
+    scopes=scopes,
+)
+async def on_dequeue_current_cmd(ctx: interactions.SlashContext):
+    await dequeue_current(ctx)
+
+
+@interactions.slash_command(
     name="owner",
     description="Owner only commands",
     sub_cmd_name="reset_cache",
@@ -422,6 +433,22 @@ async def on_stop_cmd(ctx: interactions.SlashContext):
 )
 async def on_random_cmd(ctx: interactions.SlashContext):
     await random_(ctx)
+
+
+@interactions.slash_command(
+    name="skip_to",
+    description="Skip to a song in the queue",
+    options=[
+        interactions.SlashCommandOption(
+            name="song_number",
+            description="The number of the song to skip to",
+            required=True,
+            type=interactions.OptionType.INTEGER,
+        ),
+    ],
+)
+async def on_skip_to_cmd(ctx: interactions.SlashContext, song_number: int):
+    await skip_to(ctx, song_number)
 
 
 def main():

@@ -127,8 +127,7 @@ async def handle_next_song(ctx: interactions.InteractionContext):
     download_then_play_thread(
         song_queue.next, ctx, asyncio.get_running_loop(), only_download=True
     )
-    await player._stopped.wait()
-    logger.debug(ctx)
+    await player_buffer._stopped.wait()
     if player_buffer != player:
         logger.debug("Player changed")
         return
@@ -153,7 +152,6 @@ async def play_song_in_voice_channel(
     song_metadata: youtube.SongMetadata,
     file_path: Path,
     user_invoked=True,
-    edit_if_component=True,
 ):
     logger.debug(f"Playing {file_path}")
     if isinstance(ctx.author, interactions.User):
@@ -180,12 +178,13 @@ async def play_song_in_voice_channel(
     audio = AudioVolume(file_path)
     logger.debug(f"Volume audio: {config.volume_audio}")
     await stop_player(disconnect=False)
+    global player
     player = Player(audio=audio, v_state=voice_state, loop=asyncio.get_running_loop())
     player.play()
+    asyncio.create_task(handle_next_song(ctx))
     # Volume can only be set after the player is playing for some reason
     set_player_current_audio_volume()
     await now_playing(ctx)
-    asyncio.create_task(handle_next_song(ctx))
 
 
 def append_to_queue(
@@ -272,7 +271,7 @@ async def pause(ctx: interactions.InteractionContext):
 
 
 async def defer(ctx: interactions.InteractionContext):
-    if not ctx.deferred:
+    if not ctx.deferred and not ctx.responded:
         await ctx.defer()
 
 
@@ -360,21 +359,13 @@ async def unmute(ctx: interactions.InteractionContext):
     await send_volume_control(ctx)
 
 
-async def valid_next_or_previous(
-    ctx: interactions.InteractionContext, user_invoked=True
-):
+async def next_(ctx: interactions.InteractionContext, user_invoked=True):
     if not song_queue.current:
         if user_invoked:
             await send(ctx, "No song in queue")
-        return False
+        return
     if user_invoked and not youtube.downloads.get(song_queue.next["id"]):
         await defer(ctx)
-    return True
-
-
-async def next_(ctx: interactions.InteractionContext, user_invoked=True):
-    if not await valid_next_or_previous(ctx, user_invoked):
-        return
     download_then_play_thread(
         song_queue.next,
         ctx,
@@ -384,8 +375,11 @@ async def next_(ctx: interactions.InteractionContext, user_invoked=True):
 
 
 async def previous(ctx: interactions.InteractionContext):
-    if not await valid_next_or_previous(ctx, user_invoked=True):
+    if not song_queue.current:
+        await send(ctx, "No song in queue")
         return
+    if not youtube.downloads.get(song_queue.previous["id"]):
+        await defer(ctx)
     download_then_play_thread(
         song_queue.previous,
         ctx,
@@ -393,7 +387,7 @@ async def previous(ctx: interactions.InteractionContext):
     )
 
 
-async def stop_player(disconnect=True):
+async def stop_player(disconnect: bool):
     global player
     if not player:
         return
@@ -409,7 +403,7 @@ async def clear_queue(ctx: interactions.InteractionContext):
     if not song_queue.current:
         await send(ctx, "Queue is empty")
         return
-    await stop_player()
+    await stop_player(True)
     song_queue.clear()
     await send(ctx, "Queue cleared")
 
@@ -420,15 +414,15 @@ async def show_queue(ctx: interactions.InteractionContext):
         return
 
     if not player:
-        song_status = "Stopped"
+        playback_status = "⏹️"
     elif player.paused:
-        song_status = "Paused"
+        playback_status = "⏸️"
     else:
-        song_status = "Now Playing"
+        playback_status = "▶️"
     queue_str = "\n".join(
-        f"🎵 {song_status}: {song['title']}"
+        f"***{playback_status} {song['title']}***"
         if i == song_queue.current_index
-        else f"{i+1}. {song['title']}"
+        else f"**{i+1}.** _{song['title']}_"
         for i, song in enumerate(song_queue.queue)
     )
     chunks = split_into_chunks(queue_str, discord_msg_limit)
@@ -451,25 +445,35 @@ async def shuffle(ctx: interactions.InteractionContext):
     await show_queue(ctx)
 
 
-async def dequeue(ctx: interactions.InteractionContext, song_number: int):
-    if len(song_queue.queue) == 0:
-        await send(ctx, "Queue is empty")
-        return
-    if len(song_queue.queue) == 1:
-        await send(
-            ctx, "There is only one song in the queue, use `clear_queue` instead"
-        )
-        return
+async def is_valid_song_number(
+    ctx: interactions.InteractionContext, song_number: int
+) -> bool:
     if song_number < 1 or song_number > len(song_queue.queue):
         await send(ctx, "Invalid song number")
         await show_queue(ctx)
+        return False
+    return True
+
+
+async def dequeue(ctx: interactions.InteractionContext, song_number: int):
+    if not song_queue.current:
+        await send(ctx, "No song in queue")
+        return
+    if not await is_valid_song_number(ctx, song_number):
         return
     index = song_number - 1
+    was_playing = player is not None and not player.paused
+    should_resume = False
     if index == song_queue.current_index:
-        await send(ctx, "Cannot remove current song")
-        return
+        if len(song_queue.queue) > 1:
+            should_resume = True
+            await stop_player(False)
+        else:
+            await stop_player(True)
     song_queue.dequeue(index)
     await show_queue(ctx)
+    if was_playing and should_resume:
+        await resume(ctx)
 
 
 async def dequeue_next(ctx: interactions.InteractionContext):
@@ -478,6 +482,10 @@ async def dequeue_next(ctx: interactions.InteractionContext):
 
 async def dequeue_previous(ctx: interactions.InteractionContext):
     await dequeue(ctx, song_queue.previous_index + 1)
+
+
+async def dequeue_current(ctx: interactions.InteractionContext):
+    await dequeue(ctx, song_queue.current_index + 1)
 
 
 async def now_playing(
@@ -500,7 +508,7 @@ async def stop(ctx: interactions.InteractionContext):
         await send(ctx, "No song is currently playing")
         return
 
-    await stop_player()
+    await stop_player(True)
     await ctx.send("Stopped the current song")
 
 
@@ -517,7 +525,7 @@ async def creator(ctx: interactions.InteractionContext):
 
 async def reset_cache(ctx: interactions.InteractionContext):
     logger.debug("Resetting caches")
-    await stop_player()
+    await stop_player(True)
     for cache in Cache.all:
         logger.debug(f"Resetting {cache.name}")
         await owner_send(ctx, f"Resetting {cache.name}")
@@ -532,6 +540,17 @@ async def metrics(ctx: interactions.InteractionContext):
         ctx,
         content=content,
     )
+
+
+async def skip_to(ctx: interactions.InteractionContext, song_number: int):
+    if not song_queue.current:
+        await send(ctx, "No song in queue")
+        return
+    if not await is_valid_song_number(ctx, song_number):
+        return
+    await stop_player(False)
+    song_queue.current_index = song_number - 1
+    await resume(ctx)
 
 
 async def random_(ctx: interactions.InteractionContext):
@@ -549,7 +568,7 @@ async def random_(ctx: interactions.InteractionContext):
     song_queue.clear()
     song_queue.extend(songs)
     search_results.extend(songs)
-    await stop_player()
+    await stop_player(False)
     await resume(ctx)
 
 

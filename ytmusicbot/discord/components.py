@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 def song_embed_component(
     song_metadata: youtube.SongMetadata | youtube.SongMetadata,
 ) -> interactions.Embed:
-    logger.debug(f"Embeding {song_metadata}")
+    logger.debug(f"Embedding {song_metadata}")
     return interactions.Embed(
         title=song_metadata["title"],
         url=song_metadata["url"],

@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 cache/
 random_songs/
+logs/
 
 .env
 ytmusibot.log

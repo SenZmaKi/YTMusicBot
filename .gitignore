@@ -4,6 +4,7 @@ __pycache__/
 cache/
 random_songs/
 logs/
+go-bot/
 
 .env
 ytmusibot.log

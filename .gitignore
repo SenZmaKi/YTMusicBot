@@ -5,5 +5,5 @@ cache/
 random_songs/
 
 .env
-musibot.log
+ytmusibot.log
 playlist_info.json

@@ -5,7 +5,7 @@ from ytmusicbot.discord.common import (
     logger,
     DiscordException,
 )
-import ytmusicbot.youtube.main as youtube
+import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import Cache
 from dotenv import load_dotenv
 

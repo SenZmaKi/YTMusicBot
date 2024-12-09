@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 import interactions
-import ytmusicbot.youtube.main as youtube
+import ytmusicbot.youtube  as youtube
 from ytmusicbot.common.main import logger
 from ytmusicbot.discord.common import ButtonID
 from interactions.api.voice.player import Player

@@ -21,7 +21,7 @@ from ytmusicbot.discord.components import (
     volume_control_component,
 )
 from ytmusicbot.discord.caches import Config, SearchResults, SongQueue
-import ytmusicbot.youtube.main as youtube
+import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import REPO, CREATOR_NAME, CREATOR_DISCORD_CHAT_URL, Cache
 
 player: Player | None = None
@@ -179,9 +179,7 @@ async def play_song_in_voice_channel(
     logger.debug(f"Current song: {song_queue.current}")
     audio = AudioVolume(file_path)
     logger.debug(f"Volume audio: {config.volume_audio}")
-    global player
-    if player:
-        player.stop()
+    await stop_player(disconnect=False)
     player = Player(audio=audio, v_state=voice_state, loop=asyncio.get_running_loop())
     player.play()
     # Volume can only be set after the player is playing for some reason
@@ -362,15 +360,21 @@ async def unmute(ctx: interactions.InteractionContext):
     await send_volume_control(ctx)
 
 
-async def next_(ctx: interactions.InteractionContext, user_invoked=True):
+async def valid_next_or_previous(
+    ctx: interactions.InteractionContext, user_invoked=True
+):
     if not song_queue.current:
-        if not player or player.stopped:
-            return
         if user_invoked:
             await send(ctx, "No song in queue")
-        return
+        return False
     if user_invoked and not youtube.downloads.get(song_queue.next["id"]):
         await defer(ctx)
+    return True
+
+
+async def next_(ctx: interactions.InteractionContext, user_invoked=True):
+    if not await valid_next_or_previous(ctx, user_invoked):
+        return
     download_then_play_thread(
         song_queue.next,
         ctx,
@@ -380,11 +384,8 @@ async def next_(ctx: interactions.InteractionContext, user_invoked=True):
 
 
 async def previous(ctx: interactions.InteractionContext):
-    if not song_queue.current:
-        await send(ctx, "No song in queue")
+    if not await valid_next_or_previous(ctx, user_invoked=True):
         return
-    if not youtube.downloads.get(song_queue.previous["id"]):
-        await defer(ctx)
     download_then_play_thread(
         song_queue.previous,
         ctx,
@@ -392,7 +393,7 @@ async def previous(ctx: interactions.InteractionContext):
     )
 
 
-async def stop_player():
+async def stop_player(disconnect=True):
     global player
     if not player:
         return
@@ -400,7 +401,7 @@ async def stop_player():
     player = None
     if player_buffer:
         player_buffer.stop()
-        if player_buffer.state.connected:
+        if disconnect and player_buffer.state.connected:
             await player_buffer.state.disconnect()
 
 
@@ -418,8 +419,7 @@ async def show_queue(ctx: interactions.InteractionContext):
         await send(ctx, "Queue is empty")
         return
 
-    # Prepare the formatted queue lines
-    if not player or player.stopped:
+    if not player:
         song_status = "Stopped"
     elif player.paused:
         song_status = "Paused"
@@ -496,7 +496,7 @@ async def now_playing(
 
 
 async def stop(ctx: interactions.InteractionContext):
-    if not player or player.stopped:
+    if not player:
         await send(ctx, "No song is currently playing")
         return
 

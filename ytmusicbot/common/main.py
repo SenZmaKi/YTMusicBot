@@ -10,14 +10,14 @@ from typing import Callable, Generic, TypeVar
 load_dotenv()
 
 
-logger = logging.getLogger("musibot")
+logger = logging.getLogger("ytmusibot")
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("musibot.log"),
+        logging.FileHandler("ytmusibot.log"),
     ],
 )
 

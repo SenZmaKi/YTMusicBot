@@ -8,6 +8,7 @@ from youtube_search import YoutubeSearch
 from pathlib import Path
 from ytmusicbot.common.main import Cache, logger, cache_dir
 from dotenv import load_dotenv
+import sys
 
 
 load_dotenv()
@@ -237,7 +238,7 @@ def download_single(url: str, id: str) -> DownloadResponse:
     try:
         check_downloads_folder_size()
         metadata = get_song_metadata(url, download=True)
-    except YoutubeException:
+    except Exception:
         downloads.currently_downloading.remove(id)
         raise
     downloads.currently_downloading.remove(id)
@@ -351,5 +352,8 @@ def test():
     test_download_mix(only_extract_metadata=True)
 
 
-if __name__ == "__main__":
-    test()
+def main():
+    if "--configure-random-songs" in sys.argv or "-crs" in sys.argv:
+        configure_random_songs()
+    else:
+        test()

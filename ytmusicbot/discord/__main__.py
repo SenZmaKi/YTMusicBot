@@ -1,3 +1,6 @@
+# This is in __main__.py instead of main.py because otherwise the bot
+# commands don't get registered
+
 from typing import Any
 import interactions
 from ytmusicbot.discord.common import (
@@ -421,12 +424,9 @@ async def on_random_cmd(ctx: interactions.SlashContext):
     await random_(ctx)
 
 
-# NOTE: This has to be at the very bottom right after all commands 
-#       have been registered by the decorators
 def main():
     logger.debug("Starting bot")
     bot.start()
 
 
-if __name__ == "__main__":
-    main()
+main()

@@ -17,5 +17,4 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python3.12 -m ytmusicbot.youtube --configure-random-songs
 deactivate
-chmod +x google-cloud/*.sh
 mv ../.env .env

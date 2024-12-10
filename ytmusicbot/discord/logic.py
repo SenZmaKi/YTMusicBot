@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 import random
 import threading
-import traceback
 from typing import cast
 import interactions
 from interactions.api.voice.audio import AudioVolume
@@ -26,6 +25,7 @@ from ytmusicbot.discord.caches import Config, SearchResults, SongQueue
 import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import REPO, CREATOR_NAME, CREATOR_DISCORD_CHAT_URL, Cache
 from interactions.ext.paginators import Paginator, Page
+
 
 player: Player | None = None
 config = Config()
@@ -86,39 +86,14 @@ async def search(ctx: interactions.InteractionContext, query: str, max_results: 
         await send(ctx, embed=embed, components=components)
 
 
-def split_into_chunks(message: str, limit: int) -> list[str]:
-    """
-    Splits a message into chunks while respecting the character limit.
-    """
-    chunks = []
-    while len(message) > limit:
-        # Find the last newline before the limit
-        split_index = message.rfind("\n", 0, limit)
-        if split_index == -1:  # No newline found, split at the limit
-            split_index = limit
-        chunks.append(message[:split_index])
-        message = message[split_index:]
-    if message:
-        chunks.append(message)
-    return chunks
-
-
 async def send_error(ctx: interactions.InteractionContext, exception: Exception):
     logger.error(exception)
-    trace = "".join(
-        traceback.format_exception(type(exception), exception, exception.__traceback__)
+    embed = interactions.Embed(
+        title="Error",
+        description=f"{exception}",
+        color=0xFF0000,
     )
-    msg_formatter = "```\n{}\n```"
-    limit = discord_msg_limit - len(msg_formatter.format(""))
-    chunks = split_into_chunks(trace, limit)
-    for chunk in chunks:
-        formatted_chunk = msg_formatter.format(chunk)
-        embed = interactions.Embed(
-            title=f"Unhandled Exception: {exception.__class__.__name__}",
-            description=formatted_chunk,
-            color=0xFF0000,
-        )
-        await send(ctx, embed=embed)
+    await send(ctx, embed=embed)
 
 
 def get_author_voice_state(

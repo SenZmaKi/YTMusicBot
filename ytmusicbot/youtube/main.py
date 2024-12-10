@@ -23,7 +23,41 @@ randoms_songs_dir.mkdir(exist_ok=True)
 
 class YoutubeException(Exception):
     def __init__(self, message: str) -> None:
-        self.message = message
+        super().__init__(message)
+
+
+class InvalidURLException(YoutubeException):
+    def __init__(self, url: str) -> None:
+        super().__init__(f"Invalid Youtube URL: {url}")
+
+
+class UnavailableVideoException(YoutubeException):
+    def __init__(self, url: str) -> None:
+        super().__init__(
+            f"Video {url} is unavailable, it could be private/deleted/invalid"
+        )
+
+
+class UnavailablePlaylistException(YoutubeException):
+    def __init__(self, url: str) -> None:
+        super().__init__(
+            f"Playlist {url} is unavailable, it could be private/empty/invalid"
+        )
+
+
+class EmptyPlaylistException(YoutubeException):
+    def __init__(self, url: str) -> None:
+        super().__init__(f"Playlist {url} is empty")
+
+
+class ExtractVideoInfoException(YoutubeException):
+    def __init__(self, url: str) -> None:
+        super().__init__(f"Failed to extract video info from {url}")
+
+
+class ExtractPlaylistInfoException(YoutubeException):
+    def __init__(self, url: str) -> None:
+        super().__init__(f"Failed to extract playlist info from {url}")
 
 
 YOUTUBE_HOME_URL = "https://www.youtube.com"
@@ -165,8 +199,17 @@ def get_song_metadata(url: str, download=False) -> SongMetadata:
     try:
         info = youtube_dl.extract_info(url, download=download)
         if not info:
-            raise YoutubeException(f"Could not extract info from {url}")
-    except yt_dlp.utils.DownloadError as e:
+            logger.error(f"Weird, info is {info} for {url}")
+            raise ExtractVideoInfoException(url)
+    except yt_dlp.utils.YoutubeDLError as e:
+        logger.error(e)
+        if msg := e.msg:
+            match msg:
+                case _ if "Incomplete YouTube ID" in msg:
+                    raise InvalidURLException(msg)
+                case _ if "Video unavailable" in msg:
+                    raise UnavailableVideoException(msg)
+
         raise YoutubeException(f"Error downloading {url}: {e}")
     return info_to_song_metadata(info)
 
@@ -199,24 +242,32 @@ def get_songs_in_playlist(
     try:
         # Mixes don't require processing
         info = youtube_dl.extract_info(url, download=False, process=False)
+        if not info:
+            logger.error(f"Weird, info is {info} for {url}")
         is_mix = True
-    except yt_dlp.utils.DownloadError as e:
-        raise YoutubeException(f"Error getting playlist info from {url}: {e}")
+    except yt_dlp.utils.YoutubeDLError as e:
+        if msg := e.msg:
+            match msg:
+                case _ if "The playlist does not exist" in msg:
+                    raise UnavailablePlaylistException(url)
+        raise ExtractPlaylistInfoException(url)
     if not info or not info.get("entries"):
         is_mix = False
         info = youtube_dl.extract_info(url, download=False, process=True)
         if not info:
-            raise YoutubeException(f"Could not extract playlist info from {url}")
+            raise ExtractPlaylistInfoException(url)
         if not info.get("entries"):
-            raise YoutubeException(
-                f"No entries found in {url}, playlist could be private/empty/invalid"
-            )
+            raise UnavailablePlaylistException(url)
 
     logger.debug(f"{url} mix status: {is_mix}")
     entries = info["entries"]
+    is_empty = True
     for entry in entries:
+        is_empty = False
         metadata = info_to_song_metadata(entry, is_mix_info=is_mix)
         yield metadata
+    if is_empty:
+        raise EmptyPlaylistException(url)
 
 
 def download_single(url: str, id: str) -> DownloadResponse:

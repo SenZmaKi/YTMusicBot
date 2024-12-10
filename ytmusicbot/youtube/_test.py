@@ -1,4 +1,9 @@
-from ytmusicbot.youtube.main import get_id, search, download_single, get_songs_in_playlist
+from ytmusicbot.youtube.main import (
+    get_id,
+    search,
+    download_single,
+    get_songs_in_playlist,
+)
 
 
 def test_rx():
@@ -61,7 +66,7 @@ def test_playlist(
         raise Exception("Not a playlist")
 
 
-def test_download_single(url="https://www.youtube.com/watch?v=F1kCWrem5RU"):
+def test_download_single(url="https://www.youtube.com/watch?v=jJPMnTXl63E"):
     id, is_playlist = get_id(url)
     if not id:
         raise Exception("Invalid url")

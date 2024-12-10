@@ -4,9 +4,9 @@ __pycache__/
 cache/
 random_songs/
 logs/
-go-bot/
+.scraps/
 
 .env
 dev.env
 ytmusibot.log
-playlist_info.json
+custom_random_songs_config.json

@@ -301,7 +301,9 @@ def test_download_single(url="https://www.youtube.com/watch?v=F1kCWrem5RU"):
 
 
 def configure_random_songs():
-    random_songs_config_path = Path("random_songs_config.json")
+    random_songs_config_path = Path("custom_random_songs_config.json")
+    if not random_songs_config_path.exists():
+        random_songs_config_path = Path("random_songs_config.json")
     with open(random_songs_config_path, "r") as f:
         songs = json.load(f)
         for song in songs:

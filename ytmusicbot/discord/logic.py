@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import random
+import sys
 import threading
 import traceback
 from typing import cast
@@ -12,6 +13,8 @@ from interactions.api.voice.player import Player
 from ytmusicbot.discord.common import (
     logger,
     DiscordException,
+    bot,
+    bot_restarted,
 )
 from ytmusicbot.discord.components import (
     play_button,
@@ -600,6 +603,21 @@ async def random_(ctx: interactions.InteractionContext):
     search_results.extend(songs)
     await stop_player(False)
     await resume(ctx)
+
+
+async def stop_bot(ctx: interactions.InteractionContext):
+    logger.debug("Stopping bot")
+    await owner_send(ctx, "Stopping bot")
+    await stop_player(True)
+    await bot.stop()
+
+
+async def restart_bot(ctx: interactions.InteractionContext):
+    logger.debug("Restarting bot")
+    global bot_restarted
+    bot_restarted[0] = True
+    await owner_send(ctx, "Restarting bot")
+    await stop_bot(ctx)
 
 
 def download_then_play_thread(

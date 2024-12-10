@@ -1,13 +1,15 @@
 # This is in __main__.py instead of main.py because otherwise the bot
 # commands don't get registered
 
-from typing import Any
 import interactions
-from ytmusicbot.common.main import load_dotenv
 from ytmusicbot.discord.common import (
     ButtonID,
     logger,
     DiscordException,
+    bot,
+    bot_restarted,
+    make_bot,
+    scopes,
 )
 from ytmusicbot.discord.logic import (
     decrease_volume,
@@ -39,24 +41,8 @@ from ytmusicbot.discord.logic import (
     stop,
     random_,
     skip_to,
-)
-
-import os
-
-load_dotenv()
-discord_token = os.getenv("DISCORD_TOKEN")
-
-if not discord_token:
-    raise DiscordException("Discord token not found in environment variables")
-
-server_ids = os.getenv("SERVER_IDS")
-if not server_ids:
-    raise DiscordException("Server IDs not found in environment variables")
-scopes: Any = server_ids.split(",")
-
-bot = interactions.Client(
-    token=discord_token,
-    send_not_ready_messages=True,
+    stop_bot,
+    restart_bot,
 )
 
 
@@ -453,9 +439,39 @@ async def on_skip_to_cmd(ctx: interactions.SlashContext, song_number: int):
     await skip_to(ctx, song_number)
 
 
+@interactions.slash_command(
+    name="owner",
+    description="Owner only commands",
+    sub_cmd_name="stop_bot",
+    sub_cmd_description="Stop the bot",
+    scopes=scopes,
+)
+@interactions.check(interactions.is_owner())
+async def on_stop_bot_cmd(ctx: interactions.SlashContext):
+    await stop_bot(ctx)
+
+
+@interactions.slash_command(
+    name="owner",
+    description="Owner only commands",
+    sub_cmd_name="restart_bot",
+    sub_cmd_description="Restart the bot",
+    scopes=scopes,
+)
+@interactions.check(interactions.is_owner())
+async def on_restart_bot_cmd(ctx: interactions.SlashContext):
+    await restart_bot(ctx)
+
+
 def main():
+    global bot_restarted, bot
     logger.debug("Starting bot")
     bot.start()
+    if bot_restarted[0]:
+        logger.debug("Bot restarted")
+        bot_restarted[0] = False
+        bot = make_bot()
+        main()
 
 
 main()

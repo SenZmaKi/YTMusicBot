@@ -1,4 +1,3 @@
-- restart/stop bot
 - paginate queue
 - play url/title
 - error handling

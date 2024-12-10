@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# curl https://raw.githubusercontent.com/SenZmaKi/YTMusicBot/master/google-cloud/install.sh | bash
+# curl https://raw.githubusercontent.com/SenZmaKi/YTMusicBot/master/cloud/install.sh | bash
 
 set -e
 

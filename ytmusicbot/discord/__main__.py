@@ -55,7 +55,10 @@ if not server_ids:
     raise DiscordException("Server IDs not found in environment variables")
 scopes: Any = server_ids.split(",")
 
-bot = interactions.Client(token=os.getenv("DISCORD_TOKEN"))
+bot = interactions.Client(
+    token=os.getenv("DISCORD_TOKEN"),
+    send_not_ready_messages=True,
+)
 
 
 @interactions.slash_command(

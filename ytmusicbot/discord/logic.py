@@ -131,7 +131,6 @@ async def handle_next_song(ctx: interactions.InteractionContext):
     if player_buffer != player:
         logger.debug("Player changed")
         return
-    player = None
     logger.debug("Playing next")
     if config.loop:
         logger.debug("Looping")
@@ -153,21 +152,34 @@ async def play_song_in_voice_channel(
     file_path: Path,
     user_invoked=True,
 ):
+    global player
+    if player and not player.stopped:
+        return
     logger.debug(f"Playing {file_path}")
     if isinstance(ctx.author, interactions.User):
         raise DiscordException("Author is User instead of Member")
 
     author_voice_state = get_author_voice_state(ctx)
-    voice_state = ctx.voice_state
 
     if not author_voice_state:
         logger.debug("Author not in channel")
-        if user_invoked:
-            logger.debug("Telling author to join channel")
-            await send(ctx, "Please join a voice channel first")
-        if voice_state:
-            logger.debug("Author left channel diconnecting")
-            await voice_state.channel.disconnect()
+        if player and player.state.connected:
+            if user_invoked:
+                logger.debug(
+                    f"Telling author to join {player.state.channel.name} voice channel"
+                )
+                await send(
+                    ctx,
+                    f"Please join `{player.state.channel.name}` voice channel first",
+                )
+            else:
+                logger.debug("Author left channel, stopping player")
+                await stop_player(True)
+        else:
+            if user_invoked:
+                logger.debug("Telling author to join a voice channel")
+                await send(ctx, "Please join a voice channel first")
+
         return
 
     voice_state = await author_voice_state.channel.connect()
@@ -178,7 +190,7 @@ async def play_song_in_voice_channel(
     audio = AudioVolume(file_path)
     logger.debug(f"Volume audio: {config.volume_audio}")
     await stop_player(disconnect=False)
-    global player
+    voice_state = ctx.voice_state
     player = Player(audio=audio, v_state=voice_state, loop=asyncio.get_running_loop())
     player.play()
     asyncio.create_task(handle_next_song(ctx))

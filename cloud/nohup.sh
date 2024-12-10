@@ -2,4 +2,4 @@
 
 set -e
 
-nohup bash google-cloud/run.sh &
+nohup bash cloud/run.sh &

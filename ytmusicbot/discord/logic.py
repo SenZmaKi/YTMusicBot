@@ -3,7 +3,6 @@ import json
 import os
 from pathlib import Path
 import random
-import sys
 import threading
 import traceback
 from typing import cast
@@ -42,13 +41,16 @@ async def send(
     embeds: list[interactions.Embed] | None = None,
     ephemeral=False,
 ):
+    content_debug = content[:100] if content else content
     if (
         not ctx.responded
         and isinstance(ctx, interactions.ComponentContext)
         and components
     ):
+        logger.debug(f"Editing origin {content_debug=} {embed=} {components=}")
         await ctx.edit_origin(content=content, embed=embed, components=components)
     else:
+        logger.debug(f"Sending {content} {embed=} {components=}")
         await ctx.send(
             content=content,
             embed=embed,
@@ -220,15 +222,22 @@ def append_to_queue(
         )
 
 
-async def load_url(url: str, ctx: interactions.InteractionContext):
-    id, is_playlist = youtube.get_id(url)
+async def load_title_or_url(title_or_url: str, ctx: interactions.InteractionContext):
+    id, is_playlist = youtube.get_id(title_or_url)
     if not id:
-        await send(ctx, "Invalid YouTube url")
-        return
+        results = youtube.search(title_or_url, max_results=1)
+        if not results:
+            await send(ctx, f'No results found for "{title_or_url}"')
+            return
+        search_results.extend(results)
+        title_or_url = results[0]["url"]
+        id, is_playlist = youtube.get_id(title_or_url)
+        if not id:
+            raise DiscordException(f"Invalid url {title_or_url}")
     if is_playlist:
         await defer(ctx)
         try:
-            for idx, sm in enumerate(youtube.get_songs_in_playlist(url)):
+            for idx, sm in enumerate(youtube.get_songs_in_playlist(title_or_url)):
                 logger.debug(f"Appending {sm}")
                 append_to_queue(ctx, sm)
                 if idx == 0:
@@ -243,7 +252,7 @@ async def load_url(url: str, ctx: interactions.InteractionContext):
         if not song_metadata:
             await defer(ctx)
             try:
-                song_metadata = youtube.get_song_metadata(url)
+                song_metadata = youtube.get_song_metadata(title_or_url)
                 search_results.append(song_metadata)
             except youtube.YoutubeException as e:
                 await send_error(ctx, e)
@@ -255,11 +264,11 @@ async def load_url(url: str, ctx: interactions.InteractionContext):
         await send(ctx, embed=embed)
 
 
-async def play(url: str, ctx: interactions.InteractionContext):
-    logger.debug(f"Playing {url}")
+async def play(title_or_url: str, ctx: interactions.InteractionContext):
+    logger.debug(f"Play {title_or_url}")
     song_queue.clear()
     is_first = True
-    async for song_metadata in load_url(url, ctx):
+    async for song_metadata in load_title_or_url(title_or_url, ctx):
         if is_first:
             is_first = False
             download_then_play_thread(
@@ -269,14 +278,14 @@ async def play(url: str, ctx: interactions.InteractionContext):
             )
 
 
-async def queue(url: str, ctx: interactions.InteractionContext):
-    logger.debug(f"Queueing {url}")
-    async for _ in load_url(url, ctx):
+async def queue(title_or_url: str, ctx: interactions.InteractionContext):
+    logger.debug(f"Queue {title_or_url}")
+    async for _ in load_title_or_url(title_or_url, ctx):
         pass
 
 
 async def pause(ctx: interactions.InteractionContext):
-    logger.debug("Pausing")
+    logger.debug("Pause")
     if not player or player.paused or not song_queue.current:
         await send(ctx, "No song is currently playing")
         return
@@ -290,7 +299,7 @@ async def defer(ctx: interactions.InteractionContext):
 
 
 async def resume(ctx: interactions.InteractionContext):
-    logger.debug("Resuming")
+    logger.debug("Resume")
     if song_queue.current:
         if player:
             if not player.paused:
@@ -355,6 +364,7 @@ async def decrease_volume(ctx: interactions.InteractionContext):
 
 
 async def mute(ctx: interactions.InteractionContext):
+    logger.debug("Mute")
     if config.mute:
         await send(ctx, "Already muted")
         return
@@ -364,6 +374,7 @@ async def mute(ctx: interactions.InteractionContext):
 
 
 async def unmute(ctx: interactions.InteractionContext):
+    logger.debug("Unmute")
     if not config.mute:
         await send(ctx, "Already unmuted")
         return
@@ -417,7 +428,7 @@ async def stop_player(disconnect: bool):
 
 
 async def clear_queue(ctx: interactions.InteractionContext):
-    logger.debug("Clearing queue")
+    logger.debug("Clear queue")
     if not song_queue.current:
         await send(ctx, "Queue is empty")
         return
@@ -427,7 +438,7 @@ async def clear_queue(ctx: interactions.InteractionContext):
 
 
 async def show_queue(ctx: interactions.InteractionContext):
-    logger.debug("Showing queue")
+    logger.debug("Show queue")
     if not song_queue.current:
         await send(ctx, "Queue is empty")
         return
@@ -450,19 +461,19 @@ async def show_queue(ctx: interactions.InteractionContext):
 
 
 async def loop(ctx: interactions.InteractionContext):
-    logger.debug("Looping")
+    logger.debug("Loop")
     config.loop = True
     await now_playing(ctx)
 
 
 async def unloop(ctx: interactions.InteractionContext):
-    logger.debug("Unlooping")
+    logger.debug("Unloop")
     config.loop = False
     await now_playing(ctx)
 
 
 async def shuffle(ctx: interactions.InteractionContext):
-    logger.debug("Shuffling")
+    logger.debug("Shuffle")
     song_queue.shuffle()
     await show_queue(ctx)
 
@@ -478,7 +489,7 @@ async def is_valid_song_number(
 
 
 async def dequeue(ctx: interactions.InteractionContext, song_number: int):
-    logger.debug(f"Dequeuing {song_number}")
+    logger.debug(f"Dequeue {song_number}")
     if not song_queue.current:
         await send(ctx, "No song in queue")
         return
@@ -500,17 +511,17 @@ async def dequeue(ctx: interactions.InteractionContext, song_number: int):
 
 
 async def dequeue_next(ctx: interactions.InteractionContext):
-    logger.debug("Dequeuing next")
+    logger.debug("Dequeue next")
     await dequeue(ctx, song_queue.next_index + 1)
 
 
 async def dequeue_previous(ctx: interactions.InteractionContext):
-    logger.debug("Dequeuing previous")
+    logger.debug("Dequeue previous")
     await dequeue(ctx, song_queue.previous_index + 1)
 
 
 async def dequeue_current(ctx: interactions.InteractionContext):
-    logger.debug("Dequeuing current")
+    logger.debug("Dequeue current")
     await dequeue(ctx, song_queue.current_index + 1)
 
 
@@ -531,7 +542,7 @@ async def now_playing(
 
 
 async def stop(ctx: interactions.InteractionContext):
-    logger.debug("Stopping")
+    logger.debug("Stop")
     if not player:
         await send(ctx, "No song is currently playing")
         return
@@ -554,7 +565,7 @@ async def creator(ctx: interactions.InteractionContext):
 
 
 async def reset_cache(ctx: interactions.InteractionContext):
-    logger.debug("Resetting cache")
+    logger.debug("Reset cache")
     await stop_player(True)
     for cache in Cache.all:
         logger.debug(f"Resetting {cache.name}")
@@ -564,7 +575,7 @@ async def reset_cache(ctx: interactions.InteractionContext):
 
 
 async def metrics(ctx: interactions.InteractionContext):
-    logger.debug("Showing metrics")
+    logger.debug("Metrics")
     folder_metrics = youtube.download_folder_metrics()
     content = f"Downloads folder size: {folder_metrics.size_mbs:.2f} MB\nSize limit: {folder_metrics.size_limit_mbs} MB\nTotal downloads: {folder_metrics.total_downloads}"
     await owner_send(
@@ -574,7 +585,7 @@ async def metrics(ctx: interactions.InteractionContext):
 
 
 async def skip_to(ctx: interactions.InteractionContext, song_number: int):
-    logger.debug(f"Skipping to {song_number}")
+    logger.debug(f"Skip to {song_number}")
     if not song_queue.current:
         await send(ctx, "No song in queue")
         return
@@ -606,14 +617,14 @@ async def random_(ctx: interactions.InteractionContext):
 
 
 async def stop_bot(ctx: interactions.InteractionContext):
-    logger.debug("Stopping bot")
+    logger.debug("Stop bot")
     await owner_send(ctx, "Stopping bot")
     await stop_player(True)
     await bot.stop()
 
 
 async def restart_bot(ctx: interactions.InteractionContext):
-    logger.debug("Restarting bot")
+    logger.debug("Restart bot")
     global bot_restarted
     bot_restarted[0] = True
     await owner_send(ctx, "Restarting bot")

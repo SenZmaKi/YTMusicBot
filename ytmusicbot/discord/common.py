@@ -30,6 +30,9 @@ def make_bot():
     return interactions.Client(
         token=discord_token,
         send_not_ready_messages=True,
+        sync_interactions=True,
+        delete_unused_application_cmds=True,
+        auto_defer=True,
     )
 
 

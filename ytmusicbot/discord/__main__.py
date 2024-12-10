@@ -308,16 +308,16 @@ async def on_creator_cmd(ctx: interactions.SlashContext):
     description="Play a song",
     options=[
         interactions.SlashCommandOption(
-            name="url",
-            description="The YouTube url of the song/playlist to play",
+            name="title_or_url",
+            description="The YouTube title/url of the song/playlist to play",
             required=True,
             type=interactions.OptionType.STRING,
         ),
     ],
     scopes=scopes,
 )
-async def on_play_cmd(ctx: interactions.SlashContext, url: str):
-    await play(url, ctx)
+async def on_play_cmd(ctx: interactions.SlashContext, title_or_url: str):
+    await play(title_or_url, ctx)
 
 
 @interactions.slash_command(
@@ -325,16 +325,16 @@ async def on_play_cmd(ctx: interactions.SlashContext, url: str):
     description="Queue a song",
     options=[
         interactions.SlashCommandOption(
-            name="url",
-            description="The YouTube url of the song/playlist to queue",
+            name="title_or_url",
+            description="The YouTube title/url of the song/playlist to queue",
             required=True,
             type=interactions.OptionType.STRING,
         ),
     ],
     scopes=scopes,
 )
-async def on_queue_cmd(ctx: interactions.SlashContext, url: str):
-    await queue(url, ctx)
+async def on_queue_cmd(ctx: interactions.SlashContext, title_or_url: str):
+    await queue(title_or_url, ctx)
 
 
 @interactions.slash_command(

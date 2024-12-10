@@ -3,6 +3,7 @@
 
 from typing import Any
 import interactions
+from ytmusicbot.common.main import load_dotenv
 from ytmusicbot.discord.common import (
     ButtonID,
     logger,
@@ -41,10 +42,8 @@ from ytmusicbot.discord.logic import (
 )
 
 import os
-from dotenv import load_dotenv
 
 load_dotenv()
-
 discord_token = os.getenv("DISCORD_TOKEN")
 
 if not discord_token:
@@ -56,7 +55,7 @@ if not server_ids:
 scopes: Any = server_ids.split(",")
 
 bot = interactions.Client(
-    token=os.getenv("DISCORD_TOKEN"),
+    token=discord_token,
     send_not_ready_messages=True,
 )
 

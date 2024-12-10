@@ -4,12 +4,16 @@ import os
 from pathlib import Path
 import shutil
 import threading
-from dotenv import load_dotenv
 from typing import Callable, Generic, TypeVar
+import dotenv
+
+
+def load_dotenv():
+    dotenv.load_dotenv(override=True)
+    dotenv.load_dotenv("dev.env", override=True)
+
 
 load_dotenv()
-
-
 logger = logging.getLogger("ytmusibot")
 logging.basicConfig(
     level=logging.DEBUG,

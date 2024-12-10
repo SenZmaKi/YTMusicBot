@@ -1,5 +1,4 @@
-- restart
-- google-cloud to cloud
+- restart/stop bot
 - paginate queue
 - play url/title
 - error handling

@@ -6,13 +6,11 @@ from typing import Any, Generator, NamedTuple, TypedDict, cast
 import yt_dlp
 from youtube_search import YoutubeSearch
 from pathlib import Path
-from ytmusicbot.common.main import Cache, logger, cache_dir
-from dotenv import load_dotenv
+from ytmusicbot.common.main import Cache, load_dotenv, logger, cache_dir
 import sys
 
 
 load_dotenv()
-
 
 logger = logger.getChild("youtube")
 IBYTES_TO_MBS = 1024**2

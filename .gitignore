@@ -7,5 +7,6 @@ logs/
 go-bot/
 
 .env
+dev.env
 ytmusibot.log
 playlist_info.json

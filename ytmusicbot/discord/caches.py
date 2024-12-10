@@ -6,11 +6,10 @@ from ytmusicbot.discord.common import (
     DiscordException,
 )
 import ytmusicbot.youtube as youtube
-from ytmusicbot.common.main import Cache
-from dotenv import load_dotenv
+from ytmusicbot.common.main import Cache, load_dotenv
+
 
 load_dotenv()
-
 
 class ConfigData(TypedDict):
     volume: int

@@ -11,6 +11,7 @@ from ytmusicbot.common.main import Cache, load_dotenv
 
 load_dotenv()
 
+
 class ConfigData(TypedDict):
     volume: int
     loop: bool

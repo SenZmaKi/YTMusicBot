@@ -25,6 +25,7 @@ from ytmusicbot.discord.components import (
 from ytmusicbot.discord.caches import Config, SearchResults, SongQueue
 import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import REPO, CREATOR_NAME, CREATOR_DISCORD_CHAT_URL, Cache
+from interactions.ext.paginators import Paginator, Page
 
 player: Player | None = None
 config = Config()
@@ -40,9 +41,16 @@ async def send(
     components: list[interactions.Button] | None = None,
     embeds: list[interactions.Embed] | None = None,
     ephemeral=False,
+    paginator: Paginator | None = None,
 ):
     content_debug = content[:100] if content else content
-    if (
+    if paginator:
+        page_1 = paginator.pages[0]
+        page_1_debug = page_1.content[:100] if isinstance(page_1, Page) else page_1
+
+        logger.debug(f"Sending paginator {page_1_debug=}")
+        await paginator.send(ctx)
+    elif (
         not ctx.responded
         and isinstance(ctx, interactions.ComponentContext)
         and components
@@ -106,7 +114,7 @@ async def send_error(ctx: interactions.InteractionContext, exception: Exception)
     for chunk in chunks:
         formatted_chunk = msg_formatter.format(chunk)
         embed = interactions.Embed(
-            title=f"Error Occurred: {exception.__class__.__name__}",
+            title=f"Unhandled Exception: {exception.__class__.__name__}",
             description=formatted_chunk,
             color=0xFF0000,
         )
@@ -437,6 +445,19 @@ async def clear_queue(ctx: interactions.InteractionContext):
     await send(ctx, "Queue cleared")
 
 
+def get_current_song_page_index(paginator: Paginator) -> int:
+    line_count_so_far = 0
+    current_song_line = song_queue.current_index + 1
+    for page_index, page in enumerate(paginator.pages):
+        if not isinstance(page, Page):
+            continue
+        page_lines = page.content.splitlines()
+        line_count_so_far += len(page_lines)
+        if current_song_line <= line_count_so_far:
+            return page_index
+    raise DiscordException("Failed to get current song page index")
+
+
 async def show_queue(ctx: interactions.InteractionContext):
     logger.debug("Show queue")
     if not song_queue.current:
@@ -449,15 +470,18 @@ async def show_queue(ctx: interactions.InteractionContext):
         playback_status = "⏸️"
     else:
         playback_status = "▶️"
-    queue_str = "\n".join(
+    queue = [
         f"***{playback_status} {song['title']}***"
         if i == song_queue.current_index
-        else f"**{i+1}.** _{song['title']}_"
+        else f"**{i+1}.** {song['title']}"
         for i, song in enumerate(song_queue.queue)
-    )
-    chunks = split_into_chunks(queue_str, discord_msg_limit)
-    for chunk in chunks:
-        await send(ctx, chunk)
+    ]
+    page_size = 1500
+    paginator = Paginator.create_from_list(bot, queue, page_size=page_size)
+    paginator.show_first_button = False
+    paginator.show_last_button = False
+    paginator.page_index = get_current_song_page_index(paginator)
+    await send(ctx, paginator=paginator)
 
 
 async def loop(ctx: interactions.InteractionContext):

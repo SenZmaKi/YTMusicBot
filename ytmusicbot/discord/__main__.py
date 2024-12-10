@@ -1,6 +1,7 @@
 # This is in __main__.py instead of main.py because otherwise the bot
 # commands don't get registered
 
+
 import interactions
 from ytmusicbot.discord.common import (
     ButtonID,

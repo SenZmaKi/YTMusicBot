@@ -106,11 +106,12 @@ class SongQueue(Cache[Literal["data"], SongQueueData]):
         if not self.current:
             return
         current_buffer = self.current
+        next_buffer = self.next
         was_current = self.queue[index]["id"] == current_buffer["id"]
         self.queue.pop(index)
         if self.queue:
             if was_current:
-                self.current_index = index
+                self.current = next_buffer
             else:
                 self.current = current_buffer
         else:

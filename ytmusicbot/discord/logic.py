@@ -141,8 +141,8 @@ async def play_song_in_voice_channel(
 ):
     logger.debug(f"Playing {file_path}")
     global player
-    if player and not player.stopped:
-        return
+    if player:
+        await stop_player(False)
     if isinstance(ctx.author, interactions.User):
         raise DiscordException("Author is User instead of Member")
 
@@ -205,7 +205,9 @@ def append_to_queue(
         )
 
 
-async def load_title_or_url(title_or_url: str, ctx: interactions.InteractionContext):
+async def load_title_or_url(
+    title_or_url: str, ctx: interactions.InteractionContext, should_show_queue: bool
+):
     id, is_playlist = youtube.get_id(title_or_url)
     if not id:
         results = youtube.search(title_or_url, max_results=1)
@@ -228,7 +230,8 @@ async def load_title_or_url(title_or_url: str, ctx: interactions.InteractionCont
         except youtube.YoutubeException as e:
             await send_error(ctx, e)
         else:
-            await show_queue(ctx)
+            if should_show_queue:
+                await show_queue(ctx)
 
     else:
         song_metadata = search_results.get(id)
@@ -243,15 +246,18 @@ async def load_title_or_url(title_or_url: str, ctx: interactions.InteractionCont
         append_to_queue(ctx, song_metadata)
         logger.debug(f"Added {song_metadata} to queue")
         yield song_metadata
-        embed = song_embed_component(song_metadata).set_footer(text="Queued")
-        await send(ctx, embed=embed)
+        if should_show_queue:
+            embed = song_embed_component(song_metadata).set_footer(text="Queued")
+            await send(ctx, embed=embed)
 
 
 async def play(title_or_url: str, ctx: interactions.InteractionContext):
     logger.debug(f"Play {title_or_url}")
-    song_queue.clear()
+    await clear_queue(ctx, is_user_invoked=False, disconnect_player=False)
     is_first = True
-    async for song_metadata in load_title_or_url(title_or_url, ctx):
+    async for song_metadata in load_title_or_url(
+        title_or_url, ctx, should_show_queue=False
+    ):
         if is_first:
             is_first = False
             download_then_play_thread(
@@ -263,7 +269,7 @@ async def play(title_or_url: str, ctx: interactions.InteractionContext):
 
 async def queue(title_or_url: str, ctx: interactions.InteractionContext):
     logger.debug(f"Queue {title_or_url}")
-    async for _ in load_title_or_url(title_or_url, ctx):
+    async for _ in load_title_or_url(title_or_url, ctx, should_show_queue=True):
         pass
 
 
@@ -410,14 +416,17 @@ async def stop_player(disconnect: bool):
             await player_buffer.state.disconnect()
 
 
-async def clear_queue(ctx: interactions.InteractionContext):
+async def clear_queue(
+    ctx: interactions.InteractionContext, is_user_invoked=True, disconnect_player=True
+):
     logger.debug("Clear queue")
-    if not song_queue.current:
+    if not song_queue.current and is_user_invoked:
         await send(ctx, "Queue is empty")
         return
-    await stop_player(True)
+    await stop_player(disconnect_player)
     song_queue.clear()
-    await send(ctx, "Queue cleared")
+    if is_user_invoked:
+        await send(ctx, "Queue cleared")
 
 
 def get_current_song_page_index(paginator: Paginator) -> int:
@@ -559,7 +568,7 @@ async def creator(ctx: interactions.InteractionContext):
     logger.debug("Creator")
     await send(
         ctx,
-        f"You can find the creator, {CREATOR_NAME} on discord at {CREATOR_DISCORD_CHAT_URL}",
+        f"You can find the creator, {CREATOR_NAME}, on discord at {CREATOR_DISCORD_CHAT_URL}",
     )
 
 

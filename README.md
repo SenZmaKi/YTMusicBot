@@ -15,7 +15,7 @@ A feature rich and blazingly fast Discord bot for playing music from YouTube.
   <a href="#environment-variables">Environment Variables</a>
 </p>
 
-<video src="https://raw.githubusercontent.com/SenZmaKi/YTMusicBot/master/.github/demo.mp4" 
+<video src="https://github.com/user-attachments/assets/06fae060-0bc9-43b0-8153-04f4cf430e22" 
        width="100%" 
        height="auto" 
        controls 

@@ -16,13 +16,36 @@ class ConfigData(TypedDict):
     volume: int
     loop: bool
     mute: bool
+    favourites: list[youtube.SongMetadata]
 
 
 class Config(Cache[Literal["data"], ConfigData]):
     def __init__(self) -> None:
         super().__init__(
-            "config", logger, {"data": {"volume": 50, "loop": False, "mute": False}}
+            "config",
+            logger,
+            {"data": {"volume": 50, "loop": False, "mute": False, "favourites": []}},
         )
+
+    @property
+    def favourites(self):
+        return self["data"]["favourites"]
+
+    def in_favourites(self, song: youtube.SongMetadata) -> bool:
+        return youtube.list_contains_song(self.favourites, song)
+
+    def append_favourite(self, song: youtube.SongMetadata) -> None:
+        if self.in_favourites(song):
+            return
+        self.favourites.append(song)
+        self.save()
+
+    def remove_favourite(self, url: str) -> None:
+        for song in self.favourites:
+            if song["url"] == url:
+                self.favourites.remove(song)
+                self.save()
+                return
 
     @property
     def mute(self):
@@ -173,10 +196,7 @@ class SongQueue(Cache[Literal["data"], SongQueueData]):
         self.save()
 
     def __contains__(self, value: youtube.SongMetadata) -> bool:
-        for song in self.queue:
-            if song["id"] == value["id"]:
-                return True
-        return False
+        return youtube.list_contains_song(self.queue, value)
 
 
 class SearchResults(Cache[Literal["data"], list[youtube.SongMetadata]]):

@@ -72,6 +72,13 @@ class SongMetadata(TypedDict):
     thumbnail_url: str
 
 
+def list_contains_song(song_list: list[SongMetadata], song: SongMetadata) -> bool:
+    for s in song_list:
+        if s["id"] == song["id"]:
+            return True
+    return False
+
+
 def search(query: str, max_results=10) -> list[SongMetadata]:
     yts_results = cast(
         list[dict[str, Any]], YoutubeSearch(query, max_results=max_results).to_dict()

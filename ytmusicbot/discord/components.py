@@ -10,13 +10,13 @@ if TYPE_CHECKING:
 
 
 def song_embed_component(
-    song_metadata: youtube.SongMetadata | youtube.SongMetadata,
+    song: youtube.SongMetadata | youtube.SongMetadata,
 ) -> interactions.Embed:
-    logger.debug(f"Embedding {song_metadata}")
+    logger.debug(f"Embedding {song}")
     return interactions.Embed(
-        title=song_metadata["title"],
-        url=song_metadata["url"],
-    ).set_thumbnail(url=song_metadata["thumbnail_url"])
+        title=song["title"],
+        url=song["url"],
+    ).set_thumbnail(url=song["thumbnail_url"])
 
 
 def pause_button() -> interactions.Button:
@@ -127,6 +127,22 @@ def shuffle_button() -> interactions.Button:
     )
 
 
+def favourite_button(url: str) -> interactions.Button:
+    return interactions.Button(
+        style=interactions.ButtonStyle.SECONDARY,
+        emoji="❤️",
+        custom_id=f"favourite-{url}",
+    )
+
+
+def unfavourite_button(url: str) -> interactions.Button:
+    return interactions.Button(
+        style=interactions.ButtonStyle.SUCCESS,
+        emoji="❤️",
+        custom_id=f"unfavourite-{url}",
+    )
+
+
 def volume_control_component(config: "Config"):
     volume_bar = generate_volume_bar(config.volume, 15)
     volume_emoji = "🔊"
@@ -161,13 +177,18 @@ def now_playing_component(
     is_paused = player and player.paused
     pauser_button = resume_button() if is_paused else pause_button()
     looper_button = unloop_button() if config.loop else loop_button()
+    url = song["url"]
+    favouriter_button = (
+        unfavourite_button(url) if config.in_favourites(song) else favourite_button(url)
+    )
+    # NOTE: Discord only allows 5 buttons per row
     playback_buttons = [
         previous_button(),
         pauser_button,
         next_button(),
+        favouriter_button,
         looper_button,
-        shuffle_button(),
+        # shuffle_button(),
     ]
-    volume_text, volume_buttons = volume_control_component(config)
     embed = song_embed_component(song).set_footer(footer)
     return embed, playback_buttons

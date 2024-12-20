@@ -44,6 +44,10 @@ from ytmusicbot.discord.logic import (
     skip_to,
     stop_bot,
     restart_bot,
+    favourite,
+    unfavourite,
+    show_favourites,
+    play_favourites,
 )
 
 
@@ -114,6 +118,42 @@ async def on_play_cmp(ctx: interactions.ComponentContext):
         raise DiscordException("Invalid custom id")
     url = url_match.group(1)
     await play(url, ctx)
+
+
+@interactions.component_callback(ButtonID.favourite_rx)
+async def on_favourite_cmp(ctx: interactions.ComponentContext):
+    url_match = ButtonID.favourite_rx.match(ctx.custom_id)
+    if not url_match:
+        raise DiscordException("Invalid custom id")
+    url = url_match.group(1)
+    await favourite(url, ctx)
+
+
+@interactions.component_callback(ButtonID.unfavourite_rx)
+async def on_unfavourite_cmp(ctx: interactions.ComponentContext):
+    url_match = ButtonID.unfavourite_rx.match(ctx.custom_id)
+    if not url_match:
+        raise DiscordException("Invalid custom id")
+    url = url_match.group(1)
+    await unfavourite(url, ctx)
+
+
+@interactions.slash_command(
+    name="show_favourites",
+    description="Show your favourite songs",
+    scopes=scopes,
+)
+async def on_show_favourites_cmd(ctx: interactions.SlashContext):
+    await show_favourites(ctx)
+
+
+@interactions.slash_command(
+    name="play_favourites",
+    description="Play your favourite songs",
+    scopes=scopes,
+)
+async def on_play_favourites_cmd(ctx: interactions.SlashContext):
+    await play_favourites(ctx)
 
 
 @interactions.slash_command(

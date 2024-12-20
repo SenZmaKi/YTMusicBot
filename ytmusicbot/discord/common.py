@@ -42,6 +42,8 @@ bot = make_bot()
 class ButtonID:
     play_rx = re.compile("play-(.*)")
     queue_rx = re.compile("queue-(.*)")
+    favourite_rx = re.compile("favourite-(.*)")
+    unfavourite_rx = re.compile("unfavourite-(.*)")
     pause = "pause"
     resume = "resume"
     loop = "loop"

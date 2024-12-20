@@ -32,6 +32,7 @@ config = Config()
 song_queue = SongQueue()
 search_results = SearchResults()
 discord_msg_limit = int(os.getenv("DISCORD_MSG_LIMIT", 2000))
+PAGINATOR_PAGE_SIZE = 1500
 
 
 async def send(
@@ -135,7 +136,7 @@ async def handle_next_song(ctx: interactions.InteractionContext):
 
 async def play_song_in_voice_channel(
     ctx: interactions.InteractionContext,
-    song_metadata: youtube.SongMetadata,
+    song: youtube.SongMetadata,
     file_path: Path,
     user_invoked=True,
 ):
@@ -172,7 +173,7 @@ async def play_song_in_voice_channel(
     voice_state = await author_voice_state.channel.connect()
     logger.debug(f"Voice state {voice_state}")
 
-    song_queue.current = song_metadata
+    song_queue.current = song
     logger.debug(f"Current song: {song_queue.current}")
     audio = AudioVolume(file_path)
     logger.debug(f"Volume audio: {config.volume_audio}")
@@ -186,15 +187,13 @@ async def play_song_in_voice_channel(
     await now_playing(ctx)
 
 
-def append_to_queue(
-    ctx: interactions.InteractionContext, song_metadata: youtube.SongMetadata
-):
-    song_queue.append(song_metadata)
+def append_to_queue(ctx: interactions.InteractionContext, song: youtube.SongMetadata):
+    song_queue.append(song)
     if not song_queue.current:
         return
     if (
         song_queue.current["id"] != song_queue.next["id"]
-        and song_queue.next["id"] == song_metadata["id"]
+        and song_queue.next["id"] == song["id"]
     ):
         download_then_play_thread(
             song_queue.next,
@@ -234,20 +233,20 @@ async def load_title_or_url(
                 await show_queue(ctx)
 
     else:
-        song_metadata = search_results.get(id)
-        if not song_metadata:
+        song = search_results.get(id)
+        if not song:
             await defer(ctx)
             try:
-                song_metadata = youtube.get_song_metadata(title_or_url)
-                search_results.append(song_metadata)
+                song = youtube.get_song_metadata(title_or_url)
+                search_results.append(song)
             except youtube.YoutubeException as e:
                 await send_error(ctx, e)
                 return
-        append_to_queue(ctx, song_metadata)
-        logger.debug(f"Added {song_metadata} to queue")
-        yield song_metadata
+        append_to_queue(ctx, song)
+        logger.debug(f"Added {song} to queue")
+        yield song
         if should_show_queue:
-            embed = song_embed_component(song_metadata).set_footer(text="Queued")
+            embed = song_embed_component(song).set_footer(text="Queued")
             await send(ctx, embed=embed)
 
 
@@ -255,13 +254,11 @@ async def play(title_or_url: str, ctx: interactions.InteractionContext):
     logger.debug(f"Play {title_or_url}")
     await clear_queue(ctx, is_user_invoked=False, disconnect_player=False)
     is_first = True
-    async for song_metadata in load_title_or_url(
-        title_or_url, ctx, should_show_queue=False
-    ):
+    async for song in load_title_or_url(title_or_url, ctx, should_show_queue=False):
         if is_first:
             is_first = False
             download_then_play_thread(
-                song_metadata,
+                song,
                 ctx,
                 asyncio.get_running_loop(),
             )
@@ -271,6 +268,50 @@ async def queue(title_or_url: str, ctx: interactions.InteractionContext):
     logger.debug(f"Queue {title_or_url}")
     async for _ in load_title_or_url(title_or_url, ctx, should_show_queue=True):
         pass
+
+
+async def favourite(url: str, ctx: interactions.InteractionContext):
+    logger.debug(f"Favourite {url}")
+    async for song in load_title_or_url(url, ctx, should_show_queue=False):
+        config.append_favourite(song)
+    await now_playing(ctx)
+
+
+async def unfavourite(url: str, ctx: interactions.InteractionContext):
+    logger.debug(f"Unfavourite {url}")
+    config.remove_favourite(url)
+    await now_playing(ctx)
+
+
+async def show_favourites(ctx: interactions.InteractionContext):
+    logger.debug("Show favourites")
+    if not config.favourites:
+        await send(ctx, "No favourites")
+        return
+
+    favourites_list = [
+        f"**{i+1}.** {song['title']}" for i, song in enumerate(config.favourites)
+    ]
+    paginator = Paginator.create_from_list(
+        bot, favourites_list, page_size=PAGINATOR_PAGE_SIZE
+    )
+    paginator.show_first_button = False
+    paginator.show_last_button = False
+    await send(ctx, paginator=paginator)
+
+
+async def play_favourites(ctx: interactions.InteractionContext):
+    logger.debug("Play favourites")
+    if not config.favourites:
+        await send(ctx, "No favourites")
+        return
+    await defer(ctx)
+    await clear_queue(ctx, is_user_invoked=False, disconnect_player=False)
+    for song in config.favourites:
+        append_to_queue(ctx, song)
+    if not song_queue.current:
+        return
+    download_then_play_thread(song_queue.current, ctx, asyncio.get_running_loop())
 
 
 async def pause(ctx: interactions.InteractionContext):
@@ -454,14 +495,14 @@ async def show_queue(ctx: interactions.InteractionContext):
         playback_status = "⏸️"
     else:
         playback_status = "▶️"
-    queue = [
+    queue_list = [
         f"***{playback_status} {song['title']}***"
         if i == song_queue.current_index
         else f"**{i+1}.** {song['title']}"
         for i, song in enumerate(song_queue.queue)
     ]
     page_size = 1500
-    paginator = Paginator.create_from_list(bot, queue, page_size=page_size)
+    paginator = Paginator.create_from_list(bot, queue_list, page_size=page_size)
     paginator.show_first_button = False
     paginator.show_last_button = False
     paginator.page_index = get_current_song_page_index(paginator)
@@ -537,7 +578,7 @@ async def now_playing(
     ctx: interactions.InteractionContext,
     footer="Now playing",
 ):
-    logger.debug("Showing now playing")
+    logger.debug("Now playing")
     if not song_queue.current or not player:
         await send(ctx, "No song is currently playing")
         return
@@ -640,18 +681,16 @@ async def restart_bot(ctx: interactions.InteractionContext):
 
 
 def download_then_play_thread(
-    song_metadata: youtube.SongMetadata,
+    song: youtube.SongMetadata,
     ctx: interactions.InteractionContext,
     event_loop: asyncio.AbstractEventLoop,
     only_download=False,
     user_invoked=True,
 ):
     def thread_func():
-        nonlocal song_metadata
+        nonlocal song
         try:
-            file_path, song_metadata = youtube.download_single(
-                song_metadata["url"], song_metadata["id"]
-            )
+            file_path, song = youtube.download_single(song["url"], song["id"])
         except youtube.YoutubeException as e:
             asyncio.run_coroutine_threadsafe(
                 send_error(ctx, e),
@@ -662,7 +701,7 @@ def download_then_play_thread(
                 asyncio.run_coroutine_threadsafe(
                     play_song_in_voice_channel(
                         ctx,
-                        song_metadata,
+                        song,
                         file_path=file_path,
                         user_invoked=user_invoked,
                     ),

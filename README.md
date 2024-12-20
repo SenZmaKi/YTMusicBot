@@ -15,6 +15,18 @@ A feature rich and blazingly fast Discord bot for playing music from YouTube.
   <a href="#environment-variables">Environment Variables</a>
 </p>
 
+<video src="https://raw.githubusercontent.com/SenZmaKi/YTMusicBot/master/.github/demo.mp4" 
+       width="100%" 
+       height="auto" 
+       controls 
+       autoplay 
+       loop 
+       muted 
+       poster="https://raw.githubusercontent.com/SenZmaKi/YTMusicBot/master/.github/images/demo.png" 
+       preload="auto" 
+       playsinline>
+</video>
+
 ## Features
 
 - **Search Songs**: Search for songs on YouTube.
@@ -164,6 +176,7 @@ The `nohup.sh` script runs the bot in the background.
    ```bash
    pytest
    ```
+
 ## [Commands](https://github.com/SenZmaKi/YTMusicBot/blob/master/docs/commands.md)
 
 ## [Environment Variables](https://github.com/SenZmaKi/YTMusicBot/blob/master/docs/env.md)

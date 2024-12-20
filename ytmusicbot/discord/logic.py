@@ -207,6 +207,8 @@ def append_to_queue(ctx: interactions.InteractionContext, song: youtube.SongMeta
 async def load_title_or_url(
     title_or_url: str, ctx: interactions.InteractionContext, should_show_queue: bool
 ):
+
+    await defer(ctx)
     id, is_playlist = youtube.get_id(title_or_url)
     if not id:
         results = youtube.search(title_or_url, max_results=1)
@@ -219,7 +221,6 @@ async def load_title_or_url(
         if not id:
             raise DiscordException(f"Invalid url {title_or_url}")
     if is_playlist:
-        await defer(ctx)
         try:
             for idx, sm in enumerate(youtube.get_songs_in_playlist(title_or_url)):
                 logger.debug(f"Appending {sm}")
@@ -235,7 +236,6 @@ async def load_title_or_url(
     else:
         song = search_results.get(id)
         if not song:
-            await defer(ctx)
             try:
                 song = youtube.get_song_metadata(title_or_url)
                 search_results.append(song)

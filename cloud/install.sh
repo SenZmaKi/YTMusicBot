@@ -1,13 +1,13 @@
 # curl https://raw.githubusercontent.com/SenZmaKi/YTMusicBot/master/cloud/install.sh | bash
 
-# curl https://raw.githubusercontent.com/SenZmaKi/YTMusicBot/master/cloud/install.sh | bash -s -- --dev
+# curl https://raw.githubusercontent.com/SenZmaKi/YTMusicBot/master/cloud/install.sh | bash -s -- --test
 
 set -e
 
-INSTALL_DEV=false
+TEST=false
 for arg in "$@"; do
-    if [[ "$arg" == "--dev" || "$arg" == "-d" ]]; then
-        INSTALL_DEV=true
+    if [[ "$arg" == "--test" || "$arg" == "-t" ]]; then
+        TEST=true
         break
     fi
 done
@@ -24,10 +24,14 @@ cd YTMusicBot
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-if [ "$INSTALL_DEV" = true ]; then
+if [ "$TEST" = true ]; then
     pip install -r dev-requirements.txt
+    pytest -s -v
+else
+    python3.12 -m ytmusicbot.youtube --configure-random-songs
 fi
 
-python3.12 -m ytmusicbot.youtube --configure-random-songs
 deactivate
-[ -f "../.env" ] && mv ../.env .env
+if [ -f "../.env" ]; then
+  mv ../.env .env
+fi

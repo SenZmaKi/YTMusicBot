@@ -5,7 +5,7 @@
 - Create a new application.
 
   ![new application](https://raw.githubusercontent.com/SenZmaKi/YTMusicBot/master/.github/images/setup-bot/1.png)
-
+  
   ![create new application](https://raw.githubusercontent.com/SenZmaKi/YTMusicBot/master/.github/images/setup-bot/2.png)
 
 2. Switch to the `Bot` tab and click `Reset Token`.
@@ -61,7 +61,7 @@
    SERVER_IDS=<server-id>
    ```
 
-10. To add other servers, repeat steps 5-8 for each server, but at step 9, append a comma followed by the new server ID to the `SERVER_IDS` variable:
+10. To add other servers, repeat steps 5-8 for each server, but at step 8, append a comma followed by the new server ID to the `SERVER_IDS` variable:
 
     ```env
     SERVER_IDS=<server-id>,<server-id-2>

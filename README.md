@@ -14,8 +14,8 @@ A feature rich and blazingly fast Discord bot for playing music from YouTube.
   <a href="#contribution">Contribution</a> •
   <a href="#cloud-deployment-ubuntu">Cloud Deployment</a> •
   <a href="#testing">Testing</a> •
-  <a href="https://github.com/SenZmaKi/YTMusicBot/blob/master/docs/env.md">Environment Variables</a> •
-  <a href="https://github.com/SenZmaKi/YTMusicBot/blob/master/docs/setup-bot.md">Setup the bot</a>
+  <a href="#commands">Commands</a> •
+  <a href="#environment-variables">Environment Variables</a>
 </p>
 
 ## Features
@@ -117,9 +117,7 @@ A feature rich and blazingly fast Discord bot for playing music from YouTube.
    python -m ytmusicbot.discord
    ```
 
-10. [Environment variables](https://github.com/SenZmaKi/YTMusicBot/blob/master/docs/.env.md)
-
-## Contributing
+## Contribution
 
 1. Fork the repository.
 2. Create a new branch for your feature or bug fix.
@@ -170,3 +168,6 @@ The `nohup.sh` script runs the bot in the background.
    ```bash
    pytest
    ```
+## [Commands](https://github.com/SenZmaKi/YTMusicBot/blob/master/docs/commands.md)
+
+## [Environment Variables](https://github.com/SenZmaKi/YTMusicBot/blob/master/docs/env.md)

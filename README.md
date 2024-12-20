@@ -98,7 +98,6 @@ A feature rich and blazingly fast Discord bot for playing music from YouTube.
          "artist": "Cigarettes After Sex",
          "playlist_url": "https://www.youtube.com/watch?v=Or2sMfOcTtw&list=RDEMGKSEWOD6zbF-FHc_dLYrPg&start_radio=1"
        }
-       // Add more entries as needed
      ]
      ```
 

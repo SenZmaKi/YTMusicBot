@@ -205,10 +205,11 @@ def append_to_queue(ctx: interactions.InteractionContext, song: youtube.SongMeta
 
 
 async def load_title_or_url(
-    title_or_url: str, ctx: interactions.InteractionContext, should_show_queue: bool
+    title_or_url: str, ctx: interactions.InteractionContext, should_show_queue: bool, should_defer=True
 ):
 
-    await defer(ctx)
+    if should_defer:
+        await defer(ctx)
     id, is_playlist = youtube.get_id(title_or_url)
     if not id:
         results = youtube.search(title_or_url, max_results=1)
@@ -272,7 +273,7 @@ async def queue(title_or_url: str, ctx: interactions.InteractionContext):
 
 async def favourite(url: str, ctx: interactions.InteractionContext):
     logger.debug(f"Favourite {url}")
-    async for song in load_title_or_url(url, ctx, should_show_queue=False):
+    async for song in load_title_or_url(url, ctx, should_show_queue=False, should_defer=False):
         config.append_favourite(song)
     await now_playing(ctx)
 

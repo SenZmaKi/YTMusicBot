@@ -4,9 +4,6 @@
 A feature rich and blazingly fast Discord bot for playing music from YouTube.
 </p>
 
-<p align="center"
- <a href=https://github.com/SenZmaKi/YTMusicBot/actions/workflows/test.yml> <img height="30px" src=https://github.com/SenZmaKi/YTMusicBot/actions/workflows/test.yml/badge.svg alt=test-workflow-status-badge></a>
-</p>
 <p align="center">
   <a href="#installation">Installation</a> •
   <a href="#features">Features</a> •

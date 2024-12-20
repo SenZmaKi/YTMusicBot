@@ -1,4 +1,4 @@
-# Setup the Bot
+# Setting up the Bot
 
 1. Head over to [Discord Developer Portal](https://discord.com/developers/applications).
 

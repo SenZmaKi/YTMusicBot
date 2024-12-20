@@ -1,8 +1,6 @@
 import json
 import logging
-import os
 from pathlib import Path
-import shutil
 import threading
 from typing import Callable, Generic, TypeVar
 import dotenv
@@ -37,10 +35,6 @@ for module in logger_blocklist:
     logging.getLogger(module).setLevel(logging.WARNING)
 
 cache_dir = Path("cache")
-if cache_dir.exists() and os.getenv("CLEAR_CACHE") == "1":
-    logger.debug("Clearing cache")
-    shutil.rmtree(cache_dir)
-
 cache_dir.mkdir(exist_ok=True)
 
 

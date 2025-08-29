@@ -21,7 +21,7 @@ from ytmusicbot.discord.components import (
     now_playing_component,
     volume_control_component,
 )
-from ytmusicbot.discord.caches import Config, SearchResults, SongQueue
+from ytmusicbot.discord.caches import Config, SearchResults, SongQueue, UrlMapping
 import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import REPO, CREATOR_NAME, CREATOR_DISCORD_CHAT_URL, Cache
 from interactions.ext.paginators import Paginator, Page
@@ -31,6 +31,7 @@ player: Player | None = None
 config = Config()
 song_queue = SongQueue()
 search_results = SearchResults()
+url_mapping = UrlMapping()
 discord_msg_limit = int(os.getenv("DISCORD_MSG_LIMIT", 2000))
 PAGINATOR_PAGE_SIZE = 1500
 
@@ -82,6 +83,7 @@ async def search(ctx: interactions.InteractionContext, query: str, max_results: 
     search_results.extend(results)
     for result in results:
         url = result["url"]
+        url_mapping.create_hash(url)
         embed = song_embed_component(result)
         components = [play_button(url), queue_button(url)]
         await send(ctx, embed=embed, components=components)
@@ -205,9 +207,11 @@ def append_to_queue(ctx: interactions.InteractionContext, song: youtube.SongMeta
 
 
 async def load_title_or_url(
-    title_or_url: str, ctx: interactions.InteractionContext, should_show_queue: bool, should_defer=True
+    title_or_url: str,
+    ctx: interactions.InteractionContext,
+    should_show_queue: bool,
+    should_defer=True,
 ):
-
     if should_defer:
         await defer(ctx)
     id, is_playlist = youtube.get_id(title_or_url)
@@ -273,7 +277,9 @@ async def queue(title_or_url: str, ctx: interactions.InteractionContext):
 
 async def favourite(url: str, ctx: interactions.InteractionContext):
     logger.debug(f"Favourite {url}")
-    async for song in load_title_or_url(url, ctx, should_show_queue=False, should_defer=False):
+    async for song in load_title_or_url(
+        url, ctx, should_show_queue=False, should_defer=False
+    ):
         config.append_favourite(song)
     await now_playing(ctx)
 
@@ -291,7 +297,7 @@ async def show_favourites(ctx: interactions.InteractionContext):
         return
 
     favourites_list = [
-        f"**{i+1}.** {song['title']}" for i, song in enumerate(config.favourites)
+        f"**{i + 1}.** {song['title']}" for i, song in enumerate(config.favourites)
     ]
     paginator = Paginator.create_from_list(
         bot, favourites_list, page_size=PAGINATOR_PAGE_SIZE
@@ -499,7 +505,7 @@ async def show_queue(ctx: interactions.InteractionContext):
     queue_list = [
         f"***{playback_status} {song['title']}***"
         if i == song_queue.current_index
-        else f"**{i+1}.** {song['title']}"
+        else f"**{i + 1}.** {song['title']}"
         for i, song in enumerate(song_queue.queue)
     ]
     page_size = 1500

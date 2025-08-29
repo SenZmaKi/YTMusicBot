@@ -1,5 +1,7 @@
 import os
 import random
+import hashlib
+import time
 from typing import Literal, TypedDict
 from ytmusicbot.discord.common import (
     logger,
@@ -222,3 +224,44 @@ class SearchResults(Cache[Literal["data"], list[youtube.SongMetadata]]):
     def save(self) -> None:
         self.data["data"] = self["data"][-SearchResults.max_results :]
         super().save()
+
+
+class UrlMappingEntry(TypedDict):
+    url: str
+    timestamp: float
+
+
+class UrlMapping(Cache[Literal["data"], dict[str, UrlMappingEntry]]):
+    cache_lifetime = int(os.getenv("SONG_URLS_CACHE_LIFETIME", 86400))  # 24 hours default
+    
+    def __init__(self) -> None:
+        super().__init__("url_mapping", logger, {"data": {}})
+    
+    def _cleanup_expired(self) -> None:
+        """Remove expired entries"""
+        current_time = time.time()
+        expired_keys = [
+            key for key, entry in self["data"].items()
+            if current_time - entry["timestamp"] > self.cache_lifetime
+        ]
+        for key in expired_keys:
+            del self["data"][key]
+        if expired_keys:
+            self.save()
+    
+    def create_hash(self, url: str) -> str:
+        """Create a hash for the URL and store the mapping"""
+        self._cleanup_expired()
+        url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
+        self["data"][url_hash] = {
+            "url": url,
+            "timestamp": time.time()
+        }
+        self.save()
+        return url_hash
+    
+    def get_url(self, url_hash: str) -> str | None:
+        """Get URL from hash, return None if not found or expired"""
+        self._cleanup_expired()
+        entry = self["data"].get(url_hash)
+        return entry["url"] if entry else None

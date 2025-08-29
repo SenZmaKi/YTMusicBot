@@ -2,6 +2,7 @@
 # commands don't get registered
 
 
+import re
 import interactions
 from ytmusicbot.discord.common import (
     ButtonID,
@@ -48,7 +49,22 @@ from ytmusicbot.discord.logic import (
     unfavourite,
     show_favourites,
     play_favourites,
+    url_mapping,
 )
+
+
+def get_url_from_custom_id(
+    ctx: interactions.ComponentContext, regex: re.Pattern
+) -> str:
+    """Extract URL hash from custom_id and resolve to original URL"""
+    url_match = regex.match(ctx.custom_id)
+    if not url_match:
+        raise DiscordException(f"Invalid custom id: {ctx.custom_id}")
+    url_hash = url_match.group(1)
+    url = url_mapping.get_url(url_hash)
+    if not url:
+        raise DiscordException(f"URL not found in cache: {url}")
+    return url
 
 
 @interactions.slash_command(
@@ -113,28 +129,19 @@ async def on_previous_cmd(ctx: interactions.SlashContext):
 
 @interactions.component_callback(ButtonID.play_rx)
 async def on_play_cmp(ctx: interactions.ComponentContext):
-    url_match = ButtonID.play_rx.match(ctx.custom_id)
-    if not url_match:
-        raise DiscordException("Invalid custom id")
-    url = url_match.group(1)
+    url = get_url_from_custom_id(ctx, ButtonID.play_rx)
     await play(url, ctx)
 
 
 @interactions.component_callback(ButtonID.favourite_rx)
 async def on_favourite_cmp(ctx: interactions.ComponentContext):
-    url_match = ButtonID.favourite_rx.match(ctx.custom_id)
-    if not url_match:
-        raise DiscordException("Invalid custom id")
-    url = url_match.group(1)
+    url = get_url_from_custom_id(ctx, ButtonID.favourite_rx)
     await favourite(url, ctx)
 
 
 @interactions.component_callback(ButtonID.unfavourite_rx)
 async def on_unfavourite_cmp(ctx: interactions.ComponentContext):
-    url_match = ButtonID.unfavourite_rx.match(ctx.custom_id)
-    if not url_match:
-        raise DiscordException("Invalid custom id")
-    url = url_match.group(1)
+    url = get_url_from_custom_id(ctx, ButtonID.unfavourite_rx)
     await unfavourite(url, ctx)
 
 
@@ -195,10 +202,7 @@ async def on_show_queue_cmd(ctx: interactions.SlashContext):
 
 @interactions.component_callback(ButtonID.queue_rx)
 async def on_queue_cmp(ctx: interactions.ComponentContext):
-    url_match = ButtonID.queue_rx.match(ctx.custom_id)
-    if not url_match:
-        raise DiscordException("Invalid custom id")
-    url = url_match.group(1)
+    url = get_url_from_custom_id(ctx, ButtonID.queue_rx)
     await queue(url, ctx)
 
 

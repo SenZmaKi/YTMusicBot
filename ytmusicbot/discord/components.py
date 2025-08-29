@@ -3,10 +3,13 @@ import interactions
 import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import logger
 from ytmusicbot.discord.common import ButtonID
+from ytmusicbot.discord.caches import UrlMapping
 from interactions.api.voice.player import Player
 
 if TYPE_CHECKING:
     from ytmusicbot.discord.logic import Config
+
+url_mapping = UrlMapping()
 
 
 def song_embed_component(
@@ -68,20 +71,22 @@ def previous_button() -> interactions.Button:
 
 
 def play_button(url: str) -> interactions.Button:
+    url_hash = url_mapping.create_hash(url)
     return interactions.Button(
         style=interactions.ButtonStyle.GREEN,
         label="PLAY",
         emoji="🎵",
-        custom_id=f"play-{url}",
+        custom_id=f"play-{url_hash}",
     )
 
 
 def queue_button(url: str) -> interactions.Button:
+    url_hash = url_mapping.create_hash(url)
     return interactions.Button(
         style=interactions.ButtonStyle.PRIMARY,
         label="QUEUE",
         emoji="➕",
-        custom_id=f"queue-{url}",
+        custom_id=f"queue-{url_hash}",
     )
 
 
@@ -128,18 +133,20 @@ def shuffle_button() -> interactions.Button:
 
 
 def favourite_button(url: str) -> interactions.Button:
+    url_hash = url_mapping.create_hash(url)
     return interactions.Button(
         style=interactions.ButtonStyle.SECONDARY,
         emoji="❤️",
-        custom_id=f"favourite-{url}",
+        custom_id=f"favourite-{url_hash}",
     )
 
 
 def unfavourite_button(url: str) -> interactions.Button:
+    url_hash = url_mapping.create_hash(url)
     return interactions.Button(
         style=interactions.ButtonStyle.SUCCESS,
         emoji="❤️",
-        custom_id=f"unfavourite-{url}",
+        custom_id=f"unfavourite-{url_hash}",
     )
 
 

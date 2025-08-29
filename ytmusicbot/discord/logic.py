@@ -26,6 +26,8 @@ import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import REPO, CREATOR_NAME, CREATOR_DISCORD_CHAT_URL, Cache
 from interactions.ext.paginators import Paginator, Page
 
+from ytmusicbot.youtube.main import SongMetadata
+
 
 player: Player | None = None
 config = Config()
@@ -74,14 +76,31 @@ async def owner_send(ctx: interactions.InteractionContext, content: str):
     await send(ctx, content, ephemeral=True)
 
 
-async def search(ctx: interactions.InteractionContext, query: str, max_results: int):
+async def search(
+    ctx: interactions.InteractionContext,
+    query: str,
+    max_results: int,
+    include_playlists: bool,
+):
     logger.debug(f"Searching for {query}")
-    results = youtube.search(query, max_results)
+    results = youtube.search(query)
     if not results:
         await send(ctx, "No results found")
 
-    search_results.extend(results)
-    for result in results:
+    if include_playlists:
+        all_video_results = results
+    else:
+        all_video_results: list[SongMetadata] = []
+        for result in results:
+            _, is_playlist = youtube.get_id(result["url"])
+            if not is_playlist:
+                all_video_results.append(result)
+    if not all_video_results:
+        await send(ctx=ctx, content="No results found")
+    video_results = all_video_results[:max_results]
+
+    search_results.extend(video_results)
+    for result in video_results:
         url = result["url"]
         url_mapping.create_hash(url)
         embed = song_embed_component(result)

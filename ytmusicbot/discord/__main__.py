@@ -67,6 +67,10 @@ def get_url_from_custom_id(
     return url
 
 
+DEFAULT_MAX_RESULTS = 3
+DEFAULT_INCLUDE_PLAYLISTS = False
+
+
 @interactions.slash_command(
     name="search",
     description="Search for a song on YouTube",
@@ -79,15 +83,26 @@ def get_url_from_custom_id(
         ),
         interactions.SlashCommandOption(
             name="max_results",
-            description="Maximum number of results to return",
+            description=f"Maximum number of results to return. Default is {DEFAULT_MAX_RESULTS}",
             required=False,
             type=interactions.OptionType.INTEGER,
+        ),
+        interactions.SlashCommandOption(
+            name="include_playlists",
+            description=f"Whether to include playlists in the search results. Default is {DEFAULT_INCLUDE_PLAYLISTS}",
+            required=False,
+            type=interactions.OptionType.BOOLEAN,
         ),
     ],
     scopes=scopes,
 )
-async def on_search_cmd(ctx: interactions.SlashContext, query: str, max_results=3):
-    await search(ctx, query, max_results)
+async def on_search_cmd(
+    ctx: interactions.SlashContext,
+    query: str,
+    max_results=DEFAULT_MAX_RESULTS,
+    include_playlists=DEFAULT_INCLUDE_PLAYLISTS,
+):
+    await search(ctx, query, max_results, include_playlists)
 
 
 @interactions.component_callback(ButtonID.next)

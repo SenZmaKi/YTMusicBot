@@ -79,11 +79,14 @@ def list_contains_song(song_list: list[SongMetadata], song: SongMetadata) -> boo
     return False
 
 
-def search(query: str, max_results=10) -> list[SongMetadata]:
+def search(query: str, max_results: int | None = None) -> list[SongMetadata]:
     yts_results = cast(
         list[dict[str, Any]], YoutubeSearch(query, max_results=max_results).to_dict()
     )
     results = [info_to_song_metadata(r, is_search_info=True) for r in yts_results]
+    logger.debug(
+        f"Search results for: query={query}, max_results={max_results}: {yts_results}"
+    )
     return results
 
 

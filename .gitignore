@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 .ssh_keys/
+.vscode
 
 cache/
 random_songs/

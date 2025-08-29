@@ -1,6 +1,6 @@
 # python>=3.12.7
 # FFmpeg>=7.1
-yt-dlp==2024.11.18
-python-dotenv==1.0.1
-discord.py-interactions[voice]==5.13.2
+yt-dlp==2025.8.27
+python-dotenv==1.1.1
+discord.py-interactions[voice]==5.15.0
 youtube-search==2.1.2

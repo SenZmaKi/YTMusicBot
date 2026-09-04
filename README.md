@@ -145,7 +145,7 @@ The cloud deployment scripts are located in the `YTMusicBot/cloud` directory.
 
 The `install.sh` script installs the bot and its dependencies.
 
-- Create a `.env` file with your configuration then run
+- Create a `.env` file with your configuration in the current working directory then run
 
   ```bash
   curl https://raw.githubusercontent.com/SenZmaKi/YTMusicBot/master/cloud/install.sh | bash

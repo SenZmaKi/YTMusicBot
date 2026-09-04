@@ -3,6 +3,7 @@ import disnake
 import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import logger
 from ytmusicbot.discord.common import ButtonID
+from ytmusicbot.discord.caches import url_mapping
 from disnake import VoiceClient
 
 if TYPE_CHECKING:
@@ -77,26 +78,28 @@ def previous_button() -> disnake.ui.Button:
 
 
 def play_button(url: str) -> disnake.ui.Button:
-    video_id, _ = youtube.get_id(url)
-    if video_id and not video_id.startswith("http"):
+    video_id, is_playlist = youtube.get_id(url)
+    if video_id and not is_playlist and not video_id.startswith("http"):
         url = youtube.canonical_video_url(video_id)
+    url_hash = url_mapping.create_hash(url)
     return disnake.ui.Button(
         style=disnake.ButtonStyle.success,
         label="PLAY",
         emoji="🎵",
-        custom_id=f"play-{url}",
+        custom_id=f"play-{url_hash}",
     )
 
 
 def queue_button(url: str) -> disnake.ui.Button:
-    video_id, _ = youtube.get_id(url)
-    if video_id and not video_id.startswith("http"):
+    video_id, is_playlist = youtube.get_id(url)
+    if video_id and not is_playlist and not video_id.startswith("http"):
         url = youtube.canonical_video_url(video_id)
+    url_hash = url_mapping.create_hash(url)
     return disnake.ui.Button(
         style=disnake.ButtonStyle.primary,
         label="QUEUE",
         emoji="➕",
-        custom_id=f"queue-{url}",
+        custom_id=f"queue-{url_hash}",
     )
 
 
@@ -143,24 +146,26 @@ def shuffle_button() -> disnake.ui.Button:
 
 
 def favourite_button(url: str) -> disnake.ui.Button:
-    video_id, _ = youtube.get_id(url)
-    if video_id and not video_id.startswith("http"):
+    video_id, is_playlist = youtube.get_id(url)
+    if video_id and not is_playlist and not video_id.startswith("http"):
         url = youtube.canonical_video_url(video_id)
+    url_hash = url_mapping.create_hash(url)
     return disnake.ui.Button(
         style=disnake.ButtonStyle.secondary,
         emoji="❤️",
-        custom_id=f"favourite-{url}",
+        custom_id=f"favourite-{url_hash}",
     )
 
 
 def unfavourite_button(url: str) -> disnake.ui.Button:
-    video_id, _ = youtube.get_id(url)
-    if video_id and not video_id.startswith("http"):
+    video_id, is_playlist = youtube.get_id(url)
+    if video_id and not is_playlist and not video_id.startswith("http"):
         url = youtube.canonical_video_url(video_id)
+    url_hash = url_mapping.create_hash(url)
     return disnake.ui.Button(
         style=disnake.ButtonStyle.success,
         emoji="❤️",
-        custom_id=f"unfavourite-{url}",
+        custom_id=f"unfavourite-{url_hash}",
     )
 
 

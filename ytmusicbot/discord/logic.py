@@ -148,10 +148,22 @@ async def owner_send(ctx: Context, content: str):
     await send(ctx, content, ephemeral=True)
 
 
-async def search(ctx: Context, query: str, max_results: int):
+async def search(
+    ctx: Context,
+    query: str,
+    max_results: int,
+    include_playlists: bool = False,
+):
     logger.debug(f"Searching for {query}")
     await defer(ctx)
-    results = await asyncio.to_thread(youtube.search, query, max_results)
+    results = await asyncio.to_thread(youtube.search, query, None)
+    if not results:
+        await send(ctx, "No results found")
+        return
+
+    if not include_playlists:
+        results = [result for result in results if not youtube.get_id(result["url"])[1]]
+    results = results[:max_results]
     if not results:
         await send(ctx, "No results found")
         return

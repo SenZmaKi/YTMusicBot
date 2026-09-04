@@ -1,6 +1,7 @@
 import disnake
 
 from ytmusicbot.discord.common import ButtonID, DiscordException, bot, discord_token, logger
+from ytmusicbot.discord.caches import url_mapping
 from ytmusicbot.discord import logic
 
 
@@ -10,8 +11,13 @@ async def on_ready():
 
 
 @bot.slash_command(description="Search for a song on YouTube")
-async def search(inter: disnake.ApplicationCommandInteraction, query: str, max_results: int = 3):
-    await logic.search(inter, query, max_results)
+async def search(
+    inter: disnake.ApplicationCommandInteraction,
+    query: str,
+    max_results: int = 3,
+    include_playlists: bool = False,
+):
+    await logic.search(inter, query, max_results, include_playlists)
 
 
 @bot.slash_command(description="Play a song")
@@ -167,7 +173,13 @@ async def on_button_click(inter: disnake.MessageInteraction):
             (ButtonID.unfavourite_rx, logic.unfavourite),
         ):
             if match := pattern.fullmatch(custom_id):
-                await handler(match.group(1), inter)
+                url_hash = match.group(1)
+                url = url_mapping.get_url(url_hash)
+                if url is None:
+                    raise DiscordException(
+                        "This button has expired. Run the command again to refresh it."
+                    )
+                await handler(url, inter)
                 return
         raise DiscordException(f"Unknown component ID: {custom_id}")
     except Exception as error:

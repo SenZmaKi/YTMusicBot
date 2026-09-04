@@ -8,6 +8,7 @@ SERVER_IDS=<server-1,server-2>   # required
 MAX_SEARCH_RESULTS=1000          # optional, max cached search results
 DISCORD_MSG_LIMIT=2000           # optional, the current discord message limit
 MAX_DOWNLOADS_SIZE_MBS=1000      # optional, the max size of cached downloads in megabytes
+SONG_URLS_CACHE_LIFETIME=86400   # optional, button URL cache lifetime in seconds
 YTDLP_COOKIE_FILE=C:\\path\\to\\cookies.txt # optional, Netscape-format YouTube cookies
 YTDLP_COOKIES_FROM_BROWSER=chrome # optional local alternative: chrome, edge, or firefox
 ```

@@ -84,6 +84,9 @@ async def loop_command(inter: disnake.ApplicationCommandInteraction): await logi
 @bot.slash_command(description="Disable looping")
 async def unloop(inter: disnake.ApplicationCommandInteraction): await logic.unloop(inter)
 
+@bot.slash_command(description="Repeat the entire queue")
+async def loop_queue(inter: disnake.ApplicationCommandInteraction): await logic.loop_queue(inter)
+
 @bot.slash_command(description="Shuffle the queue")
 async def shuffle(inter: disnake.ApplicationCommandInteraction): await logic.shuffle(inter)
 
@@ -152,6 +155,7 @@ async def on_button_click(inter: disnake.MessageInteraction):
             ButtonID.decrease_volume: logic.decrease_volume,
             ButtonID.mute: logic.mute, ButtonID.unmute: logic.unmute,
             ButtonID.loop: logic.loop, ButtonID.unloop: logic.unloop,
+            ButtonID.loop_queue: logic.loop_queue,
             ButtonID.shuffle: logic.shuffle,
         }
         if handler := exact_handlers.get(custom_id):

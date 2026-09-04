@@ -5,6 +5,7 @@ import sys
 import time
 from pathlib import Path
 import random
+from dataclasses import dataclass, field
 import disnake
 from ytmusicbot.discord.common import (
     logger,
@@ -23,18 +24,68 @@ from ytmusicbot.discord.progress import render_progress
 import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import REPO, CREATOR_NAME, CREATOR_DISCORD_CHAT_URL, Cache
 Context = disnake.ApplicationCommandInteraction | disnake.MessageInteraction
-player: disnake.VoiceClient | None = None
-playback_generation = 0
-playback_started_at = 0.0
-playback_paused_at: float | None = None
-playback_paused_total = 0.0
-progress_message: disnake.Message | None = None
-progress_task: asyncio.Task | None = None
-config = Config()
-song_queue = SongQueue()
+
+
+@dataclass
+class PlaybackSession:
+    guild_id: int
+    config: Config = field(init=False)
+    song_queue: SongQueue = field(init=False)
+    player: disnake.VoiceClient | None = None
+    playback_generation: int = 0
+    request_generation: int = 0
+    playback_started_at: float = 0.0
+    playback_paused_at: float | None = None
+    playback_paused_total: float = 0.0
+    progress_message: disnake.Message | None = None
+    progress_task: asyncio.Task | None = None
+    playback_task: asyncio.Task | None = None
+    transition_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    text_channel_id: int | None = None
+
+    def __post_init__(self):
+        namespace = str(self.guild_id)
+        self.config = Config(namespace)
+        self.song_queue = SongQueue(namespace)
+
+
+sessions: dict[int, PlaybackSession] = {}
 search_results = SearchResults()
 discord_msg_limit = int(os.getenv("DISCORD_MSG_LIMIT", 2000))
 PAGINATOR_PAGE_SIZE = 1500
+
+
+def get_session(ctx: Context) -> PlaybackSession:
+    guild_id = getattr(ctx, "guild_id", None)
+    if guild_id is None and getattr(ctx, "guild", None):
+        guild_id = ctx.guild.id
+    if guild_id is None:
+        raise DiscordException("Playback commands can only be used in a server")
+    session = sessions.get(guild_id)
+    if session is None:
+        session = sessions[guild_id] = PlaybackSession(guild_id)
+    channel_id = getattr(ctx, "channel_id", None)
+    if channel_id:
+        session.text_channel_id = channel_id
+    return session
+
+
+async def send_session(session: PlaybackSession, content=None, **kwargs):
+    """Send without relying on an interaction token that may have expired."""
+    if session.text_channel_id is None:
+        return None
+    channel = bot.get_channel(session.text_channel_id)
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(session.text_channel_id)
+        except Exception:
+            logger.exception("Could not resolve playback status channel")
+            return None
+    try:
+        return await channel.send(content=content, **kwargs)
+    except Exception:
+        logger.exception("Could not send playback status")
+        return None
 
 
 async def send(
@@ -57,17 +108,19 @@ async def send(
             view.add_item(component)
     if isinstance(ctx, disnake.MessageInteraction) and not ctx.response.is_done():
         logger.debug(f"Editing origin {content_debug=} {embed=} {components=}")
-        kwargs = {}
-        if content is not None:
-            kwargs["content"] = content
+        # A component response represents the complete new state of that
+        # message. Explicitly clear stale content, embeds, controls and files.
+        kwargs = {"content": content, "view": view}
         if embed is not None:
             kwargs["embed"] = embed
         elif embeds is not None:
             kwargs["embeds"] = embeds
-        if view is not None:
-            kwargs["view"] = view
+        else:
+            kwargs["embed"] = None
         if file is not None:
             kwargs.update(file=file, attachments=[])
+        else:
+            kwargs["attachments"] = []
         await ctx.response.edit_message(**kwargs)
         return await ctx.original_response()
     else:
@@ -128,54 +181,58 @@ def get_author_voice_state(
 
 
 async def handle_next_song(
-    ctx: Context, voice_client: disnake.VoiceClient, generation: int
+    session: PlaybackSession, voice_client: disnake.VoiceClient, generation: int
 ):
     logger.debug("Handling next song")
-    global player
-    if not player:
+    if not session.player:
         return
-    if voice_client != player or generation != playback_generation:
+    if voice_client != session.player or generation != session.playback_generation:
         logger.debug("Player changed")
         return
-    if config.loop:
+    if session.config.repeat_mode == "song":
         logger.debug("Looping")
-        if not song_queue.current:
+        if not session.song_queue.current:
             return
-        download_then_play_thread(
-            song_queue.current,
-            ctx,
-            asyncio.get_running_loop(),
-            user_invoked=False,
-        )
+        start_song(session, session.song_queue.current, user_invoked=False)
     else:
-        await next_(ctx, user_invoked=False)
+        next_index = session.song_queue.current_index + 1
+        if next_index >= len(session.song_queue.queue):
+            if session.config.repeat_mode == "queue":
+                session.song_queue.current_index = 0
+                start_song(session, session.song_queue.current, user_invoked=False)
+                return
+            await stop_player(session, True)
+            session.song_queue.clear()
+            await send_session(session, "Queue finished")
+            return
+        session.song_queue.current_index = next_index
+        start_song(session, session.song_queue.current, user_invoked=False)
 
 
 async def play_song_in_voice_channel(
-    ctx: Context,
+    ctx: Context | None,
+    session: PlaybackSession,
     song: youtube.SongMetadata,
     file_path: Path,
     user_invoked=True,
 ):
     logger.debug(f"Playing {file_path}")
-    global player, playback_generation, playback_started_at
-    global playback_paused_at, playback_paused_total
-    author_voice_state = get_author_voice_state(ctx)
+    author_voice_state = get_author_voice_state(ctx) if ctx is not None else None
 
-    if not author_voice_state:
+    if ctx is not None and not author_voice_state:
         logger.debug("Author not in channel")
-        if player and player.is_connected():
+        if session.player and session.player.is_connected():
             if user_invoked:
                 logger.debug(
-                    f"Telling author to join {player.channel.name} voice channel"
+                    f"Telling author to join {session.player.channel.name} voice channel"
                 )
                 await send(
                     ctx,
-                    f"Please join `{player.channel.name}` voice channel first",
+                    f"Please join `{session.player.channel.name}` voice channel first",
                 )
             else:
                 logger.debug("Author left channel, stopping player")
-                await stop_player(True)
+                await stop_player(session, True)
         else:
             if user_invoked:
                 logger.debug("Telling author to join a voice channel")
@@ -183,13 +240,13 @@ async def play_song_in_voice_channel(
 
         return
 
-    channel = author_voice_state.channel
+    channel = author_voice_state.channel if author_voice_state else session.player.channel
     logger.debug("Connecting to voice channel %s", channel.id)
     try:
-        if player and player.is_connected():
-            if player.channel != channel:
-                await player.move_to(channel)
-            voice_state = player
+        if session.player and session.player.is_connected():
+            if session.player.channel != channel:
+                await session.player.move_to(channel)
+            voice_state = session.player
         else:
             voice_state = await asyncio.wait_for(channel.connect(), timeout=20)
     except TimeoutError as exc:
@@ -204,132 +261,141 @@ async def play_song_in_voice_channel(
         duration = await asyncio.to_thread(youtube.get_media_duration, file_path)
         if duration:
             song["duration"] = duration
-    song_queue.current = song
-    logger.debug(f"Current song: {song_queue.current}")
+    session.song_queue.current = song
+    logger.debug(f"Current song: {session.song_queue.current}")
     audio = disnake.PCMVolumeTransformer(
-        disnake.FFmpegPCMAudio(str(file_path)), volume=config.volume_audio
+        disnake.FFmpegPCMAudio(str(file_path)), volume=session.config.volume_audio
     )
-    logger.debug(f"Volume audio: {config.volume_audio}")
-    playback_generation += 1
-    generation = playback_generation
-    playback_started_at = time.monotonic()
-    playback_paused_at = None
-    playback_paused_total = 0.0
+    logger.debug(f"Volume audio: {session.config.volume_audio}")
+    session.playback_generation += 1
+    generation = session.playback_generation
+    session.playback_started_at = time.monotonic()
+    session.playback_paused_at = None
+    session.playback_paused_total = 0.0
     if voice_state.is_playing() or voice_state.is_paused():
         voice_state.stop()
-    player = voice_state
+    session.player = voice_state
     event_loop = asyncio.get_running_loop()
 
     def after_playback(error: Exception | None):
         if error:
             logger.error("Voice playback failed: %s", error)
         asyncio.run_coroutine_threadsafe(
-            handle_next_song(ctx, voice_state, generation), event_loop
+            handle_next_song(session, voice_state, generation), event_loop
         )
 
     voice_state.play(audio, after=after_playback)
-    await now_playing(ctx)
+    try:
+        if user_invoked and ctx is not None:
+            await now_playing(ctx)
+        else:
+            await publish_now_playing(session)
+    except Exception:
+        # Status delivery must never be mistaken for an audio failure. Playback
+        # has already started at this point.
+        logger.exception("Could not publish now-playing status")
 
 
 def append_to_queue(ctx: Context, song: youtube.SongMetadata):
-    song_queue.append(song)
-    if not song_queue.current:
+    session = get_session(ctx)
+    session.song_queue.append(song)
+    if not session.song_queue.current:
         return
     if (
-        song_queue.current["id"] != song_queue.next["id"]
-        and song_queue.next["id"] == song["id"]
+        session.song_queue.current["id"] != session.song_queue.next["id"]
+        and session.song_queue.next["id"] == song["id"]
     ):
-        download_then_play_thread(
-            song_queue.next,
-            ctx,
-            asyncio.get_running_loop(),
-            user_invoked=False,
-            only_download=True,
-        )
+        asyncio.create_task(prefetch_song(session.song_queue.next))
 
 
-async def load_title_or_url(
-    title_or_url: str, ctx: Context, should_show_queue: bool, should_defer=True
-):
+async def prefetch_song(song: youtube.SongMetadata):
+    try:
+        await asyncio.to_thread(youtube.download_single, song["url"], song["id"])
+    except Exception:
+        # Prefetch is only an optimization; start_song will retry and report a
+        # useful error if this track is actually reached.
+        logger.exception("Could not prefetch %s", song["id"])
 
-    if should_defer:
-        await defer(ctx)
+
+async def resolve_songs(title_or_url: str) -> list[youtube.SongMetadata]:
     id, is_playlist = youtube.get_id(title_or_url)
     if not id:
-        results = youtube.search(title_or_url, max_results=1)
+        results = await asyncio.to_thread(youtube.search, title_or_url, 1)
         if not results:
-            await send(ctx, f'No results found for "{title_or_url}"')
-            return
+            raise DiscordException(f'No results found for "{title_or_url}"')
         search_results.extend(results)
         title_or_url = results[0]["url"]
         id, is_playlist = youtube.get_id(title_or_url)
         if not id:
             raise DiscordException(f"Invalid url {title_or_url}")
     if is_playlist:
-        try:
-            for idx, sm in enumerate(youtube.get_songs_in_playlist(title_or_url)):
-                logger.debug(f"Appending {sm}")
-                append_to_queue(ctx, sm)
-                if idx == 0:
-                    yield sm
-        except youtube.YoutubeException as e:
-            await send_error(ctx, e)
-        else:
-            if should_show_queue:
-                await show_queue(ctx)
-
-    else:
-        song = search_results.get(id)
-        if not song:
-            try:
-                song = youtube.get_song_metadata(title_or_url)
-                search_results.append(song)
-            except youtube.YoutubeException as e:
-                await send_error(ctx, e)
-                return
-        append_to_queue(ctx, song)
-        logger.debug(f"Added {song} to queue")
-        yield song
-        if should_show_queue:
-            embed = song_embed_component(song).set_footer(text="Queued")
-            await send(ctx, embed=embed)
+        songs = await asyncio.to_thread(lambda: list(youtube.get_songs_in_playlist(title_or_url)))
+        search_results.extend(songs)
+        return songs
+    song = search_results.get(id)
+    if not song:
+        song = await asyncio.to_thread(youtube.get_song_metadata, title_or_url)
+        search_results.append(song)
+    return [song]
 
 
 async def play(title_or_url: str, ctx: Context):
     logger.debug(f"Play {title_or_url}")
-    await clear_queue(ctx, is_user_invoked=False, disconnect_player=False)
-    is_first = True
-    async for song in load_title_or_url(title_or_url, ctx, should_show_queue=False):
-        if is_first:
-            is_first = False
-            download_then_play_thread(
-                song,
-                ctx,
-                asyncio.get_running_loop(),
-            )
+    session = get_session(ctx)
+    session.request_generation += 1
+    intent_generation = session.request_generation
+    await defer(ctx)
+    songs = await resolve_songs(title_or_url)
+    file_path, metadata = await asyncio.to_thread(
+        youtube.download_single, songs[0]["url"], songs[0]["id"]
+    )
+    if intent_generation != session.request_generation:
+        return
+    await stop_player(session, False)
+    session.song_queue.clear()
+    session.song_queue.extend(songs)
+    await play_song_in_voice_channel(ctx, session, metadata, file_path, user_invoked=True)
 
 
 async def queue(title_or_url: str, ctx: Context):
     logger.debug(f"Queue {title_or_url}")
-    async for _ in load_title_or_url(title_or_url, ctx, should_show_queue=True):
-        pass
+    await defer(ctx)
+    songs = await resolve_songs(title_or_url)
+    session = get_session(ctx)
+    for song in songs:
+        append_to_queue(ctx, song)
+    if len(songs) == 1:
+        embed = song_embed_component(songs[0]).set_footer(text="Queued")
+        await send(ctx, embed=embed)
+    else:
+        await show_queue(ctx)
 
 
 async def favourite(url: str, ctx: Context):
     logger.debug(f"Favourite {url}")
-    async for song in load_title_or_url(url, ctx, should_show_queue=False, should_defer=False):
-        config.append_favourite(song)
-    await now_playing(ctx)
+    session = get_session(ctx)
+    songs = await resolve_songs(url)
+    for song in songs:
+        session.config.append_favourite(song)
+    if session.player and session.song_queue.current:
+        await now_playing(ctx)
+    else:
+        await send(ctx, f"Added **{songs[0]['title']}** to favourites")
 
 
 async def unfavourite(url: str, ctx: Context):
     logger.debug(f"Unfavourite {url}")
-    config.remove_favourite(url)
-    await now_playing(ctx)
+    get_session(ctx).config.remove_favourite(url)
+    session = get_session(ctx)
+    if session.player and session.song_queue.current:
+        await now_playing(ctx)
+    else:
+        await send(ctx, "Removed from favourites")
 
 
 async def show_favourites(ctx: Context):
     logger.debug("Show favourites")
+    config = get_session(ctx).config
     if not config.favourites:
         await send(ctx, "No favourites")
         return
@@ -342,26 +408,33 @@ async def show_favourites(ctx: Context):
 
 async def play_favourites(ctx: Context):
     logger.debug("Play favourites")
-    if not config.favourites:
+    session = get_session(ctx)
+    if not session.config.favourites:
         await send(ctx, "No favourites")
         return
     await defer(ctx)
-    await clear_queue(ctx, is_user_invoked=False, disconnect_player=False)
-    for song in config.favourites:
+    await stop_player(session, False)
+    session.song_queue.clear()
+    for song in session.config.favourites:
         append_to_queue(ctx, song)
-    if not song_queue.current:
+    if not session.song_queue.current:
         return
-    download_then_play_thread(song_queue.current, ctx, asyncio.get_running_loop())
+    start_song(session, session.song_queue.current, ctx=ctx)
 
 
 async def pause(ctx: Context):
     logger.debug("Pause")
-    if not player or player.is_paused() or not song_queue.current:
+    session = get_session(ctx)
+    if (
+        not session.player
+        or not session.player.is_playing()
+        or session.player.is_paused()
+        or not session.song_queue.current
+    ):
         await send(ctx, "No song is currently playing")
         return
-    player.pause()
-    global playback_paused_at
-    playback_paused_at = time.monotonic()
+    session.player.pause()
+    session.playback_paused_at = time.monotonic()
     await now_playing(ctx, "Paused")
 
 
@@ -372,23 +445,19 @@ async def defer(ctx: Context):
 
 async def resume(ctx: Context):
     logger.debug("Resume")
-    if song_queue.current:
-        if player:
-            if not player.is_paused():
+    session = get_session(ctx)
+    if session.song_queue.current:
+        if session.player and (session.player.is_playing() or session.player.is_paused()):
+            if not session.player.is_paused():
                 await send(ctx, "Already playing")
                 return
-            player.resume()
-            global playback_paused_at, playback_paused_total
-            if playback_paused_at is not None:
-                playback_paused_total += time.monotonic() - playback_paused_at
-                playback_paused_at = None
+            session.player.resume()
+            if session.playback_paused_at is not None:
+                session.playback_paused_total += time.monotonic() - session.playback_paused_at
+                session.playback_paused_at = None
         else:
             await defer(ctx)
-            download_then_play_thread(
-                song_queue.current,
-                ctx,
-                asyncio.get_running_loop(),
-            )
+            start_song(session, session.song_queue.current, ctx=ctx)
             return
     else:
         await send(ctx, "Queue is empty")
@@ -399,25 +468,27 @@ async def resume(ctx: Context):
 
 
 async def send_volume_control(ctx: Context):
-    text, buttons = volume_control_component(config)
+    text, buttons = volume_control_component(get_session(ctx).config)
     await send(ctx, text, components=buttons)
 
 
-def set_player_current_audio_volume():
-    if player and isinstance(player.source, disnake.PCMVolumeTransformer):
-        player.source.volume = config.volume_audio
+def set_player_current_audio_volume(session: PlaybackSession):
+    if session.player and isinstance(session.player.source, disnake.PCMVolumeTransformer):
+        session.player.source.volume = session.config.volume_audio
 
 
 async def set_volume(ctx: Context, volume: int):
     if volume < 0 or volume > 100:
         await send(ctx, "Volume must be between 0% and 100%")
         return
-    config.volume = volume
-    set_player_current_audio_volume()
+    session = get_session(ctx)
+    session.config.volume = volume
+    set_player_current_audio_volume(session)
     await send_volume_control(ctx)
 
 
 async def increase_volume(ctx: Context):
+    config = get_session(ctx).config
     if config.volume >= 100:
         await send(ctx, "Volume is already at maximum")
         return
@@ -428,6 +499,7 @@ async def increase_volume(ctx: Context):
 
 
 async def decrease_volume(ctx: Context):
+    config = get_session(ctx).config
     if config.volume <= 0:
         await send(ctx, "Volume is already at minimum")
         return
@@ -439,65 +511,67 @@ async def decrease_volume(ctx: Context):
 
 async def mute(ctx: Context):
     logger.debug("Mute")
+    session = get_session(ctx)
+    config = session.config
     if config.mute:
         await send(ctx, "Already muted")
         return
     config.mute = True
-    set_player_current_audio_volume()
+    set_player_current_audio_volume(session)
     await send_volume_control(ctx)
 
 
 async def unmute(ctx: Context):
     logger.debug("Unmute")
+    session = get_session(ctx)
+    config = session.config
     if not config.mute:
         await send(ctx, "Already unmuted")
         return
     config.mute = False
-    set_player_current_audio_volume()
+    set_player_current_audio_volume(session)
     await send_volume_control(ctx)
 
 
 async def next_(ctx: Context, user_invoked=True):
     logger.debug("Next")
-    if not song_queue.current:
+    session = get_session(ctx)
+    if not session.song_queue.current:
         if user_invoked:
             await send(ctx, "No song in queue")
         return
-    if user_invoked and not youtube.downloads.get(song_queue.next["id"]):
+    if user_invoked and not youtube.downloads.get(session.song_queue.next["id"]):
         await defer(ctx)
-    download_then_play_thread(
-        song_queue.next,
-        ctx,
-        asyncio.get_running_loop(),
-        user_invoked=user_invoked,
-    )
+    session.song_queue.current_index = session.song_queue.next_index
+    start_song(session, session.song_queue.current, ctx=ctx, user_invoked=user_invoked)
 
 
 async def previous(ctx: Context):
     logger.debug("Previous")
-    if not song_queue.current:
+    session = get_session(ctx)
+    if not session.song_queue.current:
         await send(ctx, "No song in queue")
         return
-    if not youtube.downloads.get(song_queue.previous["id"]):
+    if not youtube.downloads.get(session.song_queue.previous["id"]):
         await defer(ctx)
-    download_then_play_thread(
-        song_queue.previous,
-        ctx,
-        asyncio.get_running_loop(),
-    )
+    session.song_queue.current_index = session.song_queue.previous_index
+    start_song(session, session.song_queue.current, ctx=ctx)
 
 
-async def stop_player(disconnect: bool):
+async def stop_player(session: PlaybackSession, disconnect: bool):
     logger.debug("Stopping player")
-    global player, playback_generation, progress_task
-    if not player:
+    session.request_generation += 1
+    if session.playback_task and session.playback_task is not asyncio.current_task():
+        session.playback_task.cancel()
+    session.playback_task = None
+    if not session.player:
         return
-    player_buffer = player
-    player = None
-    playback_generation += 1
-    if progress_task:
-        progress_task.cancel()
-        progress_task = None
+    player_buffer = session.player
+    session.player = None
+    session.playback_generation += 1
+    if session.progress_task:
+        session.progress_task.cancel()
+        session.progress_task = None
     if player_buffer:
         player_buffer.stop()
         if disconnect and player_buffer.is_connected():
@@ -508,11 +582,12 @@ async def clear_queue(
     ctx: Context, is_user_invoked=True, disconnect_player=True
 ):
     logger.debug("Clear queue")
-    if not song_queue.current and is_user_invoked:
+    session = get_session(ctx)
+    if not session.song_queue.current and is_user_invoked:
         await send(ctx, "Queue is empty")
         return
-    await stop_player(disconnect_player)
-    song_queue.clear()
+    await stop_player(session, disconnect_player)
+    session.song_queue.clear()
     if is_user_invoked:
         await send(ctx, "Queue cleared")
 
@@ -535,47 +610,54 @@ async def send_lines(ctx: Context, lines: list[str]):
 
 async def show_queue(ctx: Context):
     logger.debug("Show queue")
-    if not song_queue.current:
+    session = get_session(ctx)
+    if not session.song_queue.current:
         await send(ctx, "Queue is empty")
         return
 
-    if not player:
+    if not session.player or not (session.player.is_playing() or session.player.is_paused()):
         playback_status = "⏹️"
-    elif player.is_paused():
+    elif session.player.is_paused():
         playback_status = "⏸️"
     else:
         playback_status = "▶️"
     queue_list = [
-        f"***{playback_status} {song['title']}***"
-        if i == song_queue.current_index
+        f"**{i+1}.** ***{playback_status} {song['title']}***"
+        if i == session.song_queue.current_index
         else f"**{i+1}.** {song['title']}"
-        for i, song in enumerate(song_queue.queue)
+        for i, song in enumerate(session.song_queue.queue)
     ]
     await send_lines(ctx, queue_list)
 
 
 async def loop(ctx: Context):
     logger.debug("Loop")
-    config.loop = True
+    get_session(ctx).config.loop = True
     await now_playing(ctx)
+
+
+async def loop_queue(ctx: Context):
+    logger.debug("Loop queue")
+    get_session(ctx).config.repeat_mode = "queue"
+    await now_playing(ctx, "Repeating queue")
 
 
 async def unloop(ctx: Context):
     logger.debug("Unloop")
-    config.loop = False
+    get_session(ctx).config.loop = False
     await now_playing(ctx)
 
 
 async def shuffle(ctx: Context):
     logger.debug("Shuffle")
-    song_queue.shuffle()
+    get_session(ctx).song_queue.shuffle()
     await show_queue(ctx)
 
 
 async def is_valid_song_number(
     ctx: Context, song_number: int
 ) -> bool:
-    if song_number < 1 or song_number > len(song_queue.queue):
+    if song_number < 1 or song_number > len(get_session(ctx).song_queue.queue):
         await send(ctx, "Invalid song number")
         await show_queue(ctx)
         return False
@@ -584,21 +666,22 @@ async def is_valid_song_number(
 
 async def dequeue(ctx: Context, song_number: int):
     logger.debug(f"Dequeue {song_number}")
-    if not song_queue.current:
+    session = get_session(ctx)
+    if not session.song_queue.current:
         await send(ctx, "No song in queue")
         return
     if not await is_valid_song_number(ctx, song_number):
         return
     index = song_number - 1
-    was_playing = player is not None and player.is_playing()
+    was_playing = session.player is not None and session.player.is_playing()
     should_resume = False
-    if index == song_queue.current_index:
-        if len(song_queue.queue) > 1:
+    if index == session.song_queue.current_index:
+        if len(session.song_queue.queue) > 1:
             should_resume = True
-            await stop_player(False)
+            await stop_player(session, False)
         else:
-            await stop_player(True)
-    song_queue.dequeue(index)
+            await stop_player(session, True)
+    session.song_queue.dequeue(index)
     await show_queue(ctx)
     if was_playing and should_resume:
         await resume(ctx)
@@ -606,45 +689,45 @@ async def dequeue(ctx: Context, song_number: int):
 
 async def dequeue_next(ctx: Context):
     logger.debug("Dequeue next")
-    await dequeue(ctx, song_queue.next_index + 1)
+    await dequeue(ctx, get_session(ctx).song_queue.next_index + 1)
 
 
 async def dequeue_previous(ctx: Context):
     logger.debug("Dequeue previous")
-    await dequeue(ctx, song_queue.previous_index + 1)
+    await dequeue(ctx, get_session(ctx).song_queue.previous_index + 1)
 
 
 async def dequeue_current(ctx: Context):
     logger.debug("Dequeue current")
-    await dequeue(ctx, song_queue.current_index + 1)
+    await dequeue(ctx, get_session(ctx).song_queue.current_index + 1)
 
 
-def playback_position() -> float:
-    if not playback_started_at:
+def playback_position(session: PlaybackSession) -> float:
+    if not session.playback_started_at:
         return 0.0
-    end = playback_paused_at if playback_paused_at is not None else time.monotonic()
-    return max(0.0, end - playback_started_at - playback_paused_total)
+    end = session.playback_paused_at if session.playback_paused_at is not None else time.monotonic()
+    return max(0.0, end - session.playback_started_at - session.playback_paused_total)
 
 
-def progress_file(song: youtube.SongMetadata) -> disnake.File | None:
+def progress_file(session: PlaybackSession, song: youtube.SongMetadata) -> disnake.File | None:
     duration = song.get("duration")
     if not duration:
         return None
     return disnake.File(
-        render_progress(playback_position(), duration), filename="progress.png"
+        render_progress(playback_position(session), duration), filename="progress.png"
     )
 
 
-async def refresh_progress_message(message: disnake.Message, generation: int):
-    while generation == playback_generation and player:
+async def refresh_progress_message(session: PlaybackSession, message: disnake.Message, generation: int):
+    while generation == session.playback_generation and session.player:
         await asyncio.sleep(10)
-        if generation != playback_generation or not player or not song_queue.current:
+        if generation != session.playback_generation or not session.player or not session.song_queue.current:
             return
-        song = song_queue.current
-        file = progress_file(song)
+        song = session.song_queue.current
+        file = progress_file(session, song)
         if not file:
             return
-        embed, _ = now_playing_component(song, player, config)
+        embed, _ = now_playing_component(song, session.player, session.config)
         embed.set_image(url="attachment://progress.png")
         try:
             await message.edit(embed=embed, file=file, attachments=[])
@@ -658,36 +741,60 @@ async def now_playing(
     footer="Now playing",
 ):
     logger.debug("Now playing")
-    if not song_queue.current or not player:
+    session = get_session(ctx)
+    if not session.song_queue.current or not session.player:
         await send(ctx, "No song is currently playing")
         return
-    global progress_message, progress_task
-    song = song_queue.current
-    embed, buttons = now_playing_component(song, player, config, footer)
-    file = progress_file(song)
+    song = session.song_queue.current
+    embed, buttons = now_playing_component(song, session.player, session.config, footer)
+    file = progress_file(session, song)
     if file:
         embed.set_image(url="attachment://progress.png")
-    progress_message = await send(
+    session.progress_message = await send(
         ctx,
         embed=embed,
         components=buttons,
         file=file,
     )
-    if progress_task:
-        progress_task.cancel()
-    if progress_message and song.get("duration"):
-        progress_task = asyncio.create_task(
-            refresh_progress_message(progress_message, playback_generation)
+    if session.progress_task:
+        session.progress_task.cancel()
+    if session.progress_message and song.get("duration"):
+        session.progress_task = asyncio.create_task(
+            refresh_progress_message(session, session.progress_message, session.playback_generation)
+        )
+
+
+async def publish_now_playing(session: PlaybackSession, footer="Now playing"):
+    if not session.song_queue.current or not session.player:
+        return
+    song = session.song_queue.current
+    embed, buttons = now_playing_component(song, session.player, session.config, footer)
+    file = progress_file(session, song)
+    if file:
+        embed.set_image(url="attachment://progress.png")
+    view = disnake.ui.View(timeout=None)
+    for button in buttons:
+        view.add_item(button)
+    kwargs = {"embed": embed, "view": view}
+    if file:
+        kwargs["file"] = file
+    session.progress_message = await send_session(session, **kwargs)
+    if session.progress_task:
+        session.progress_task.cancel()
+    if session.progress_message and song.get("duration"):
+        session.progress_task = asyncio.create_task(
+            refresh_progress_message(session, session.progress_message, session.playback_generation)
         )
 
 
 async def stop(ctx: Context):
     logger.debug("Stop")
-    if not player:
+    session = get_session(ctx)
+    if not session.player:
         await send(ctx, "No song is currently playing")
         return
 
-    await stop_player(True)
+    await stop_player(session, True)
     await send(ctx, "Stopped the current song")
 
 
@@ -706,7 +813,8 @@ async def creator(ctx: Context):
 
 async def reset_cache(ctx: Context):
     logger.debug("Reset cache")
-    await stop_player(True)
+    for session in sessions.values():
+        await stop_player(session, True)
     for cache in Cache.all:
         logger.debug(f"Resetting {cache.name}")
         await owner_send(ctx, f"Resetting {cache.name}")
@@ -726,13 +834,14 @@ async def metrics(ctx: Context):
 
 async def skip_to(ctx: Context, song_number: int):
     logger.debug(f"Skip to {song_number}")
-    if not song_queue.current:
+    session = get_session(ctx)
+    if not session.song_queue.current:
         await send(ctx, "No song in queue")
         return
     if not await is_valid_song_number(ctx, song_number):
         return
-    await stop_player(False)
-    song_queue.current_index = song_number - 1
+    await stop_player(session, False)
+    session.song_queue.current_index = song_number - 1
     await resume(ctx)
 
 
@@ -749,50 +858,76 @@ async def random_(ctx: Context):
         return
     random.shuffle(all_songs)
     songs = all_songs[:50]
-    song_queue.clear()
-    song_queue.extend(songs)
+    session = get_session(ctx)
+    session.song_queue.clear()
+    session.song_queue.extend(songs)
     search_results.extend(songs)
-    await stop_player(False)
+    await stop_player(session, False)
     await resume(ctx)
 
 
 async def stop_bot(ctx: Context):
     logger.debug("Stop bot")
     await owner_send(ctx, "Stopping bot")
-    await stop_player(True)
+    for session in sessions.values():
+        await stop_player(session, True)
     await bot.close()
 
 
 async def restart_bot(ctx: Context):
     logger.debug("Restart bot")
     await owner_send(ctx, "Restarting bot")
-    await stop_player(True)
+    for session in sessions.values():
+        await stop_player(session, True)
     await bot.close()
     os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
-def download_then_play_thread(
+def start_song(
+    session: PlaybackSession,
     song: youtube.SongMetadata,
-    ctx: Context,
-    event_loop: asyncio.AbstractEventLoop,
-    only_download=False,
-    user_invoked=True,
+    ctx: Context | None = None,
+    user_invoked: bool = True,
 ):
+    session.request_generation += 1
+    request_generation = session.request_generation
+    if session.playback_task:
+        session.playback_task.cancel()
+
     async def download_and_play():
         try:
             file_path, metadata = await asyncio.to_thread(
                 youtube.download_single, song["url"], song["id"]
             )
-            if not only_download:
+            if request_generation != session.request_generation:
+                return
+            async with session.transition_lock:
+                if request_generation != session.request_generation:
+                    return
                 await play_song_in_voice_channel(
-                    ctx, metadata, file_path=file_path, user_invoked=user_invoked
+                    ctx, session, metadata, file_path=file_path, user_invoked=user_invoked
                 )
+        except asyncio.CancelledError:
+            return
         except Exception as exc:
             logger.exception("Download or playback failed for %s", song["id"])
-            if user_invoked and not only_download:
+            if request_generation != session.request_generation:
+                return
+            if user_invoked and ctx is not None:
                 try:
                     await send_error(ctx, exc)
                 except Exception:
                     logger.exception("Could not send playback error to Discord")
+            else:
+                await send_session(session, f"Could not play **{song['title']}**; skipping it.")
+                next_index = session.song_queue.current_index + 1
+                if next_index < len(session.song_queue.queue):
+                    session.song_queue.current_index = next_index
+                    start_song(session, session.song_queue.current, user_invoked=False)
+                else:
+                    await stop_player(session, True)
+                    session.song_queue.clear()
+                    await send_session(session, "Queue finished")
 
-    return asyncio.run_coroutine_threadsafe(download_and_play(), event_loop)
+    session.playback_task = asyncio.create_task(download_and_play())
+    return session.playback_task

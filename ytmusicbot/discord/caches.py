@@ -15,17 +15,23 @@ load_dotenv()
 class ConfigData(TypedDict):
     volume: int
     loop: bool
+    repeat_mode: Literal["off", "song", "queue"]
     mute: bool
     favourites: list[youtube.SongMetadata]
 
 
 class Config(Cache[Literal["data"], ConfigData]):
-    def __init__(self) -> None:
+    def __init__(self, namespace: str | None = None) -> None:
+        name = "config" if namespace is None else f"config_{namespace}"
         super().__init__(
-            "config",
+            name,
             logger,
-            {"data": {"volume": 50, "loop": False, "mute": False, "favourites": []}},
+            {"data": {"volume": 50, "loop": False, "repeat_mode": "off", "mute": False, "favourites": []}},
         )
+        data = self["data"]
+        if "repeat_mode" not in data:
+            data["repeat_mode"] = "song" if data.get("loop", False) else "off"
+            self.save()
 
     @property
     def favourites(self):
@@ -58,11 +64,21 @@ class Config(Cache[Literal["data"], ConfigData]):
 
     @property
     def loop(self):
-        return self["data"]["loop"]
+        return self.repeat_mode == "song"
 
     @loop.setter
     def loop(self, value: bool):
-        self["data"]["loop"] = value
+        self.repeat_mode = "song" if value else "off"
+
+    @property
+    def repeat_mode(self) -> Literal["off", "song", "queue"]:
+        return self["data"].get("repeat_mode", "off")
+
+    @repeat_mode.setter
+    def repeat_mode(self, value: Literal["off", "song", "queue"]):
+        self["data"]["repeat_mode"] = value
+        # Retain the legacy field for compatibility with existing cache files.
+        self["data"]["loop"] = value == "song"
         self.save()
 
     @property
@@ -86,9 +102,10 @@ class SongQueueData(TypedDict):
 
 
 class SongQueue(Cache[Literal["data"], SongQueueData]):
-    def __init__(self) -> None:
+    def __init__(self, namespace: str | None = None) -> None:
+        name = "song_queue" if namespace is None else f"song_queue_{namespace}"
         super().__init__(
-            "song_queue",
+            name,
             logger,
             default_data={
                 "data": {
@@ -97,6 +114,22 @@ class SongQueue(Cache[Literal["data"], SongQueueData]):
                 }
             },
         )
+        # Repair queues written by older versions, which could contain the
+        # same video more than once with slightly different metadata.
+        unique = []
+        seen_ids = set()
+        for song in self.queue:
+            if song["id"] not in seen_ids:
+                unique.append(song)
+                seen_ids.add(song["id"])
+        changed = unique != self.queue
+        if changed:
+            self["data"]["queue"] = unique
+        if self.current_index >= len(unique):
+            self["data"]["current_index"] = max(0, len(unique) - 1)
+            changed = True
+        if changed:
+            self.save()
 
     @property
     def current(self) -> youtube.SongMetadata | None:
@@ -175,11 +208,16 @@ class SongQueue(Cache[Literal["data"], SongQueueData]):
         return previous_song
 
     def append(self, value: youtube.SongMetadata) -> None:
-        if value not in self.queue:
+        if value not in self:
             self.queue = [*self.queue, value]
 
     def extend(self, value: list[youtube.SongMetadata]) -> None:
-        missing = [song for song in value if song not in self.queue]
+        known_ids = {song["id"] for song in self.queue}
+        missing = []
+        for song in value:
+            if song["id"] not in known_ids:
+                missing.append(song)
+                known_ids.add(song["id"])
         if missing:
             self.queue = [*self.queue, *missing]
 

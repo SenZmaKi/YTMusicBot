@@ -32,7 +32,11 @@
 
 - **`/loop`**: Enable looping of the current song.
 
-- **`/unloop`**: Disable looping.
+- **`/loop_queue`**: Repeat the entire queue after its final song.
+
+- **`/unloop`**: Disable song and queue looping.
+
+  The repeat button cycles through off, current-song, and full-queue modes.
 
 - **`/shuffle`**: Shuffle the song queue.
 

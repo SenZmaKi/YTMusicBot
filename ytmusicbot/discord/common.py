@@ -43,6 +43,7 @@ class ButtonID:
     pause = "pause"
     resume = "resume"
     loop = "loop"
+    loop_queue = "loop_queue"
     unloop = "unloop"
     next = "next"
     previous = "previous"

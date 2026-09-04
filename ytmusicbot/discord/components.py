@@ -51,6 +51,15 @@ def unloop_button() -> disnake.ui.Button:
     )
 
 
+def loop_queue_button() -> disnake.ui.Button:
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.success,
+        label="QUEUE",
+        emoji="🔁",
+        custom_id=ButtonID.loop_queue,
+    )
+
+
 def next_button() -> disnake.ui.Button:
     return disnake.ui.Button(
         style=disnake.ButtonStyle.primary,
@@ -188,7 +197,12 @@ def now_playing_component(
 ) -> tuple[disnake.Embed, list[disnake.ui.Button]]:
     is_paused = player and player.is_paused()
     pauser_button = resume_button() if is_paused else pause_button()
-    looper_button = unloop_button() if config.loop else loop_button()
+    if config.repeat_mode == "song":
+        looper_button = loop_queue_button()
+    elif config.repeat_mode == "queue":
+        looper_button = unloop_button()
+    else:
+        looper_button = loop_button()
     url = song["url"]
     favouriter_button = (
         unfavourite_button(url) if config.in_favourites(song) else favourite_button(url)

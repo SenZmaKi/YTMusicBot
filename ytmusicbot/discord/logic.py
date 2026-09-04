@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 from pathlib import Path
 import random
 import disnake
@@ -18,11 +19,17 @@ from ytmusicbot.discord.components import (
     volume_control_component,
 )
 from ytmusicbot.discord.caches import Config, SearchResults, SongQueue
+from ytmusicbot.discord.progress import render_progress
 import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import REPO, CREATOR_NAME, CREATOR_DISCORD_CHAT_URL, Cache
 Context = disnake.ApplicationCommandInteraction | disnake.MessageInteraction
 player: disnake.VoiceClient | None = None
 playback_generation = 0
+playback_started_at = 0.0
+playback_paused_at: float | None = None
+playback_paused_total = 0.0
+progress_message: disnake.Message | None = None
+progress_task: asyncio.Task | None = None
 config = Config()
 song_queue = SongQueue()
 search_results = SearchResults()
@@ -151,7 +158,8 @@ async def play_song_in_voice_channel(
     user_invoked=True,
 ):
     logger.debug(f"Playing {file_path}")
-    global player, playback_generation
+    global player, playback_generation, playback_started_at
+    global playback_paused_at, playback_paused_total
     author_voice_state = get_author_voice_state(ctx)
 
     if not author_voice_state:
@@ -192,6 +200,10 @@ async def play_song_in_voice_channel(
         ) from exc
     logger.debug(f"Voice client {voice_state}")
 
+    if not song.get("duration"):
+        duration = await asyncio.to_thread(youtube.get_media_duration, file_path)
+        if duration:
+            song["duration"] = duration
     song_queue.current = song
     logger.debug(f"Current song: {song_queue.current}")
     audio = disnake.PCMVolumeTransformer(
@@ -200,6 +212,9 @@ async def play_song_in_voice_channel(
     logger.debug(f"Volume audio: {config.volume_audio}")
     playback_generation += 1
     generation = playback_generation
+    playback_started_at = time.monotonic()
+    playback_paused_at = None
+    playback_paused_total = 0.0
     if voice_state.is_playing() or voice_state.is_paused():
         voice_state.stop()
     player = voice_state
@@ -345,6 +360,8 @@ async def pause(ctx: Context):
         await send(ctx, "No song is currently playing")
         return
     player.pause()
+    global playback_paused_at
+    playback_paused_at = time.monotonic()
     await now_playing(ctx, "Paused")
 
 
@@ -361,6 +378,10 @@ async def resume(ctx: Context):
                 await send(ctx, "Already playing")
                 return
             player.resume()
+            global playback_paused_at, playback_paused_total
+            if playback_paused_at is not None:
+                playback_paused_total += time.monotonic() - playback_paused_at
+                playback_paused_at = None
         else:
             await defer(ctx)
             download_then_play_thread(
@@ -468,12 +489,15 @@ async def previous(ctx: Context):
 
 async def stop_player(disconnect: bool):
     logger.debug("Stopping player")
-    global player, playback_generation
+    global player, playback_generation, progress_task
     if not player:
         return
     player_buffer = player
     player = None
     playback_generation += 1
+    if progress_task:
+        progress_task.cancel()
+        progress_task = None
     if player_buffer:
         player_buffer.stop()
         if disconnect and player_buffer.is_connected():
@@ -595,6 +619,40 @@ async def dequeue_current(ctx: Context):
     await dequeue(ctx, song_queue.current_index + 1)
 
 
+def playback_position() -> float:
+    if not playback_started_at:
+        return 0.0
+    end = playback_paused_at if playback_paused_at is not None else time.monotonic()
+    return max(0.0, end - playback_started_at - playback_paused_total)
+
+
+def progress_file(song: youtube.SongMetadata) -> disnake.File | None:
+    duration = song.get("duration")
+    if not duration:
+        return None
+    return disnake.File(
+        render_progress(playback_position(), duration), filename="progress.png"
+    )
+
+
+async def refresh_progress_message(message: disnake.Message, generation: int):
+    while generation == playback_generation and player:
+        await asyncio.sleep(10)
+        if generation != playback_generation or not player or not song_queue.current:
+            return
+        song = song_queue.current
+        file = progress_file(song)
+        if not file:
+            return
+        embed, _ = now_playing_component(song, player, config)
+        embed.set_image(url="attachment://progress.png")
+        try:
+            await message.edit(embed=embed, file=file, attachments=[])
+        except disnake.HTTPException:
+            logger.exception("Could not refresh the playback progress message")
+            return
+
+
 async def now_playing(
     ctx: Context,
     footer="Now playing",
@@ -603,13 +661,24 @@ async def now_playing(
     if not song_queue.current or not player:
         await send(ctx, "No song is currently playing")
         return
+    global progress_message, progress_task
     song = song_queue.current
     embed, buttons = now_playing_component(song, player, config, footer)
-    await send(
+    file = progress_file(song)
+    if file:
+        embed.set_image(url="attachment://progress.png")
+    progress_message = await send(
         ctx,
         embed=embed,
         components=buttons,
+        file=file,
     )
+    if progress_task:
+        progress_task.cancel()
+    if progress_message and song.get("duration"):
+        progress_task = asyncio.create_task(
+            refresh_progress_message(progress_message, playback_generation)
+        )
 
 
 async def stop(ctx: Context):

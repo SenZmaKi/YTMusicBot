@@ -49,6 +49,46 @@ class PlaybackTransitionTests(unittest.IsolatedAsyncioTestCase):
         play_mock.assert_awaited_once()
         self.assertEqual(play_mock.await_args.args[2]["id"], "second")
 
+    async def test_reuses_connected_guild_voice_client_after_soft_stop(self):
+        voice_client = SimpleNamespace(
+            is_connected=lambda: True,
+            channel=SimpleNamespace(id=42),
+            is_playing=lambda: False,
+            is_paused=lambda: False,
+            play=lambda *_args, **_kwargs: None,
+        )
+        voice_client.move_to = AsyncMock()
+        channel = SimpleNamespace(id=42)
+        channel.connect = AsyncMock(side_effect=AssertionError("must reuse voice client"))
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(voice=SimpleNamespace(channel=channel)),
+            guild=SimpleNamespace(voice_client=voice_client),
+        )
+        session = SimpleNamespace(
+            player=None,
+            song_queue=SimpleNamespace(current=None),
+            config=SimpleNamespace(volume_audio=0.5),
+            playback_generation=0,
+            playback_started_at=0.0,
+            playback_paused_at=None,
+            playback_paused_total=0.0,
+        )
+
+        transformer = SimpleNamespace()
+        metadata = song("reuse")
+        metadata["duration"] = 1.0
+        with (
+            patch.object(logic.disnake, "FFmpegPCMAudio", return_value=object()),
+            patch.object(logic.disnake, "PCMVolumeTransformer", return_value=transformer),
+            patch.object(logic, "now_playing", AsyncMock()),
+        ):
+            await logic.play_song_in_voice_channel(
+                ctx, session, metadata, "reuse.webm", user_invoked=True
+            )
+
+        channel.connect.assert_not_awaited()
+        self.assertIs(session.player, voice_client)
+
 
 if __name__ == "__main__":
     unittest.main()

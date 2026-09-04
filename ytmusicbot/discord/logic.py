@@ -243,10 +243,15 @@ async def play_song_in_voice_channel(
     channel = author_voice_state.channel if author_voice_state else session.player.channel
     logger.debug("Connecting to voice channel %s", channel.id)
     try:
-        if session.player and session.player.is_connected():
-            if session.player.channel != channel:
-                await session.player.move_to(channel)
-            voice_state = session.player
+        # stop_player(disconnect=False) invalidates session.player so stale
+        # callbacks cannot advance the queue, but Discord still owns a live
+        # guild voice client. Reuse it instead of attempting a second connect.
+        guild_voice_client = getattr(getattr(ctx, "guild", None), "voice_client", None)
+        existing_voice_client = session.player or guild_voice_client
+        if existing_voice_client and existing_voice_client.is_connected():
+            if existing_voice_client.channel != channel:
+                await existing_voice_client.move_to(channel)
+            voice_state = existing_voice_client
         else:
             voice_state = await asyncio.wait_for(channel.connect(), timeout=20)
     except TimeoutError as exc:

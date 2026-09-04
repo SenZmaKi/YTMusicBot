@@ -1,9 +1,45 @@
 from ytmusicbot.youtube.main import (
     get_id,
+    info_to_song_metadata,
     search,
     download_single,
     get_songs_in_playlist,
 )
+
+
+def test_search_metadata_uses_canonical_url():
+    video_id = "UIe6V10sslc"
+    metadata = info_to_song_metadata(
+        {
+            "id": video_id,
+            "title": "Example",
+            "url_suffix": (
+                f"/watch?v={video_id}&list=RD{video_id}"
+                "&start_radio=1&pp=tracking-data"
+            ),
+            "thumbnails": ["https://example.com/thumbnail.jpg"],
+        },
+        is_search_info=True,
+    )
+
+    assert metadata["url"] == f"https://www.youtube.com/watch?v={video_id}"
+    assert len(f"play-{metadata['url']}") <= 100
+    assert len(f"queue-{metadata['url']}") <= 100
+
+
+def test_mix_metadata_uses_single_video_url():
+    video_id = "5OHo0NerdEY"
+    metadata = info_to_song_metadata(
+        {
+            "id": video_id,
+            "title": "If Only",
+            "url": f"https://www.youtube.com/watch?v={video_id}&list=RD{video_id}",
+            "thumbnails": [{"url": "https://example.com/thumbnail.jpg"}],
+        },
+        is_mix_info=True,
+    )
+
+    assert metadata["url"] == f"https://www.youtube.com/watch?v={video_id}"
 
 
 def test_rx():

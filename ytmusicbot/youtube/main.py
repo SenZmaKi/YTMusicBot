@@ -1,8 +1,10 @@
 import json
 import os
 import re
+import shutil
+import subprocess
 import time
-from typing import Any, Generator, NamedTuple, TypedDict, cast
+from typing import Any, Generator, NamedTuple, NotRequired, TypedDict, cast
 import yt_dlp
 from youtube_search import YoutubeSearch
 from pathlib import Path
@@ -70,6 +72,11 @@ class SongMetadata(TypedDict):
     title: str
     url: str
     thumbnail_url: str
+    duration: NotRequired[float]
+
+
+def canonical_video_url(video_id: str) -> str:
+    return f"{YOUTUBE_HOME_URL}/watch?v={video_id}"
 
 
 def list_contains_song(song_list: list[SongMetadata], song: SongMetadata) -> bool:
@@ -184,22 +191,40 @@ def check_downloads_folder_size():
 def info_to_song_metadata(
     info: dict[str, Any], is_search_info=False, is_mix_info=False
 ) -> SongMetadata:
-    if is_search_info:
-        url = f"{YOUTUBE_HOME_URL}{info['url_suffix']}"
-    elif is_mix_info:
-        url = info["url"]
-    else:
-        url = info["original_url"]
+    # Always represent an individual song with a canonical video URL. Search
+    # and Mix results often include list/start_radio/tracking parameters, which
+    # can accidentally turn a song click into a large playlist download.
+    url = canonical_video_url(info["id"])
 
     thumbnail_url = (
         info["thumbnails"][0] if is_search_info else info["thumbnails"][0]["url"]
     )
-    return {
+    metadata: SongMetadata = {
         "title": info["title"],
         "url": url,
         "thumbnail_url": thumbnail_url,
         "id": info["id"],
     }
+    if isinstance(info.get("duration"), (int, float)):
+        metadata["duration"] = float(info["duration"])
+    return metadata
+
+
+def get_media_duration(file_path: Path) -> float | None:
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", str(file_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return float(result.stdout.strip())
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        logger.exception("Could not determine duration for %s", file_path)
+        return None
 
 
 def get_song_metadata(url: str, download=False) -> SongMetadata:
@@ -240,6 +265,21 @@ opts = {
     "outtmpl": f"{download_folder}/%(id)s.%(ext)s",
     "keepvideo": False,
 }
+
+# Current yt-dlp releases require a JavaScript runtime for YouTube challenge
+# solving. Deno remains yt-dlp's default; enable Node automatically when it is
+# installed so common development environments work without extra flags.
+if shutil.which("node"):
+    opts["js_runtimes"] = {"node": {"path": None}}
+
+# Authentication is opt-in: cookie files must never be committed to the repo.
+# A Netscape-format file is preferable for servers; browser extraction is
+# convenient for local development.
+if cookie_file := os.getenv("YTDLP_COOKIE_FILE"):
+    opts["cookiefile"] = str(Path(cookie_file).expanduser())
+elif cookie_browser := os.getenv("YTDLP_COOKIES_FROM_BROWSER"):
+    opts["cookiesfrombrowser"] = (cookie_browser, None, None, None)
+
 youtube_dl = yt_dlp.YoutubeDL(opts)
 
 
@@ -279,6 +319,9 @@ def get_songs_in_playlist(
 
 def download_single(url: str, id: str) -> DownloadResponse:
     logger.debug(f"Parsed ID {id}")
+    # This function is explicitly for one video. Discard any stale playlist or
+    # radio parameters that may still exist in persisted metadata.
+    url = canonical_video_url(id)
     while id in downloads.currently_downloading:
         logger.debug(f"Waiting for {id} to finish downloading")
         time.sleep(1)

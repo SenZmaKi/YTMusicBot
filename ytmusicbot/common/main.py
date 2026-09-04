@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 from pathlib import Path
 import threading
 from typing import Callable, Generic, TypeVar
@@ -13,13 +14,20 @@ def load_dotenv():
 
 load_dotenv()
 logger = logging.getLogger("ytmusibot")
+
+# Windows consoles commonly use cp1252, which cannot encode the emoji used by
+# Discord components. Logging must never interrupt a command just because its
+# debug representation contains one of those characters.
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(errors="backslashreplace")
+
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("ytmusibot.log"),
+        logging.FileHandler("ytmusibot.log", encoding="utf-8"),
     ],
 )
 

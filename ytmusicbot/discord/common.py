@@ -2,7 +2,8 @@ import re
 from ytmusicbot.common.main import logger
 from ytmusicbot.common.main import load_dotenv
 import os
-import interactions
+import disnake
+from disnake.ext import commands
 from typing import Any
 
 
@@ -22,17 +23,12 @@ server_ids = os.getenv("SERVER_IDS")
 if not server_ids:
     raise DiscordException("Server IDs not found in environment variables")
 scopes: Any = server_ids.split(",")
-# List to allow changes to reflect across files
-bot_restarted = [False]
-
-
 def make_bot():
-    return interactions.Client(
-        token=discord_token,
-        send_not_ready_messages=True,
-        sync_interactions=True,
-        delete_unused_application_cmds=True,
-        auto_defer=True,
+    intents = disnake.Intents.default()
+    intents.voice_states = True
+    return commands.InteractionBot(
+        intents=intents,
+        test_guilds=[int(scope) for scope in scopes],
     )
 
 

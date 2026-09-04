@@ -1,9 +1,9 @@
 from typing import TYPE_CHECKING
-import interactions
+import disnake
 import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import logger
 from ytmusicbot.discord.common import ButtonID
-from interactions.api.voice.player import Player
+from disnake import VoiceClient
 
 if TYPE_CHECKING:
     from ytmusicbot.discord.logic import Config
@@ -11,133 +11,145 @@ if TYPE_CHECKING:
 
 def song_embed_component(
     song: youtube.SongMetadata | youtube.SongMetadata,
-) -> interactions.Embed:
+) -> disnake.Embed:
     logger.debug(f"Embedding {song}")
-    return interactions.Embed(
+    return disnake.Embed(
         title=song["title"],
         url=song["url"],
-    ).set_thumbnail(url=song["thumbnail_url"])
+        ).set_thumbnail(url=song["thumbnail_url"])
 
 
-def pause_button() -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.SECONDARY,
+def pause_button() -> disnake.ui.Button:
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.secondary,
         emoji="⏸",
         custom_id=ButtonID.pause,
     )
 
 
-def resume_button() -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.SUCCESS,
+def resume_button() -> disnake.ui.Button:
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.success,
         emoji="▶️",
         custom_id=ButtonID.resume,
     )
 
 
-def loop_button() -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.SECONDARY,
+def loop_button() -> disnake.ui.Button:
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.secondary,
         emoji="🔁",
         custom_id=ButtonID.loop,
     )
 
 
-def unloop_button() -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.SUCCESS,
+def unloop_button() -> disnake.ui.Button:
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.success,
         emoji="🔁",
         custom_id=ButtonID.unloop,
     )
 
 
-def next_button() -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.PRIMARY,
+def next_button() -> disnake.ui.Button:
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.primary,
         emoji="⏭️",
         custom_id=ButtonID.next,
     )
 
 
-def previous_button() -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.PRIMARY,
+def previous_button() -> disnake.ui.Button:
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.primary,
         emoji="⏮️",
         custom_id=ButtonID.previous,
     )
 
 
-def play_button(url: str) -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.GREEN,
+def play_button(url: str) -> disnake.ui.Button:
+    video_id, _ = youtube.get_id(url)
+    if video_id and not video_id.startswith("http"):
+        url = youtube.canonical_video_url(video_id)
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.success,
         label="PLAY",
         emoji="🎵",
         custom_id=f"play-{url}",
     )
 
 
-def queue_button(url: str) -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.PRIMARY,
+def queue_button(url: str) -> disnake.ui.Button:
+    video_id, _ = youtube.get_id(url)
+    if video_id and not video_id.startswith("http"):
+        url = youtube.canonical_video_url(video_id)
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.primary,
         label="QUEUE",
         emoji="➕",
         custom_id=f"queue-{url}",
     )
 
 
-def increase_volume_button() -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.PRIMARY,
+def increase_volume_button() -> disnake.ui.Button:
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.primary,
         label="+",
         emoji="🔊",
         custom_id=ButtonID.increase_volume,
     )
 
 
-def decrease_volume_button() -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.PRIMARY,
+def decrease_volume_button() -> disnake.ui.Button:
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.primary,
         label="-",
         emoji="🔈",
         custom_id=ButtonID.decrease_volume,
     )
 
 
-def mute_button() -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.SECONDARY,
+def mute_button() -> disnake.ui.Button:
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.secondary,
         emoji="🔇",
         custom_id=ButtonID.mute,
     )
 
 
-def unmute_button() -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.SUCCESS,
+def unmute_button() -> disnake.ui.Button:
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.success,
         emoji="🔇",
         custom_id=ButtonID.unmute,
     )
 
 
-def shuffle_button() -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.PRIMARY,
+def shuffle_button() -> disnake.ui.Button:
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.primary,
         emoji="🔀",
         custom_id=ButtonID.shuffle,
     )
 
 
-def favourite_button(url: str) -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.SECONDARY,
+def favourite_button(url: str) -> disnake.ui.Button:
+    video_id, _ = youtube.get_id(url)
+    if video_id and not video_id.startswith("http"):
+        url = youtube.canonical_video_url(video_id)
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.secondary,
         emoji="❤️",
         custom_id=f"favourite-{url}",
     )
 
 
-def unfavourite_button(url: str) -> interactions.Button:
-    return interactions.Button(
-        style=interactions.ButtonStyle.SUCCESS,
+def unfavourite_button(url: str) -> disnake.ui.Button:
+    video_id, _ = youtube.get_id(url)
+    if video_id and not video_id.startswith("http"):
+        url = youtube.canonical_video_url(video_id)
+    return disnake.ui.Button(
+        style=disnake.ButtonStyle.success,
         emoji="❤️",
         custom_id=f"unfavourite-{url}",
     )
@@ -170,11 +182,11 @@ def generate_volume_bar(volume: int, length: int = 10) -> str:
 
 def now_playing_component(
     song: youtube.SongMetadata,
-    player: Player | None,
+    player: VoiceClient | None,
     config: "Config",
     footer="Now playing",
-) -> tuple[interactions.Embed, list[interactions.Button]]:
-    is_paused = player and player.paused
+) -> tuple[disnake.Embed, list[disnake.ui.Button]]:
+    is_paused = player and player.is_paused()
     pauser_button = resume_button() if is_paused else pause_button()
     looper_button = unloop_button() if config.loop else loop_button()
     url = song["url"]
@@ -190,5 +202,5 @@ def now_playing_component(
         looper_button,
         # shuffle_button(),
     ]
-    embed = song_embed_component(song).set_footer(footer)
+    embed = song_embed_component(song).set_footer(text=footer)
     return embed, playback_buttons

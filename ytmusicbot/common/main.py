@@ -32,8 +32,8 @@ logging.basicConfig(
 )
 
 logger_blocklist = [
-    "interactions",
     "asyncio",
+    "disnake",
 ]
 REPO = "https://github.com/SenZmaKi/YTMusicBot"
 CREATOR_NAME = "SenZmaKi"

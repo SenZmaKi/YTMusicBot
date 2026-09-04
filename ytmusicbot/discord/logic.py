@@ -1,18 +1,14 @@
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 import random
-import threading
-from typing import cast
-import interactions
-from interactions.api.voice.audio import AudioVolume
-from interactions.api.voice.player import Player
+import disnake
 from ytmusicbot.discord.common import (
     logger,
     DiscordException,
     bot,
-    bot_restarted,
 )
 from ytmusicbot.discord.components import (
     play_button,
@@ -24,10 +20,9 @@ from ytmusicbot.discord.components import (
 from ytmusicbot.discord.caches import Config, SearchResults, SongQueue
 import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import REPO, CREATOR_NAME, CREATOR_DISCORD_CHAT_URL, Cache
-from interactions.ext.paginators import Paginator, Page
-
-
-player: Player | None = None
+Context = disnake.ApplicationCommandInteraction | disnake.MessageInteraction
+player: disnake.VoiceClient | None = None
+playback_generation = 0
 config = Config()
 song_queue = SongQueue()
 search_results = SearchResults()
@@ -36,48 +31,70 @@ PAGINATOR_PAGE_SIZE = 1500
 
 
 async def send(
-    ctx: interactions.InteractionContext,
+    ctx: Context,
     content: str | None = None,
-    embed: interactions.Embed | None = None,
-    components: list[interactions.Button] | None = None,
-    embeds: list[interactions.Embed] | None = None,
+    embed: disnake.Embed | None = None,
+    components: list[disnake.ui.Button] | None = None,
+    embeds: list[disnake.Embed] | None = None,
+    file: disnake.File | None = None,
     ephemeral=False,
-    paginator: Paginator | None = None,
 ):
-    content_debug = content[:100] if content else content
-    if paginator:
-        page_1 = paginator.pages[0]
-        page_1_debug = page_1.content[:100] if isinstance(page_1, Page) else page_1
+    if embed is not None and embeds is not None:
+        raise ValueError("Only one of embed or embeds may be provided")
 
-        logger.debug(f"Sending paginator {page_1_debug=}")
-        await paginator.send(ctx)
-    elif (
-        not ctx.responded
-        and isinstance(ctx, interactions.ComponentContext)
-        and components
-    ):
+    content_debug = content[:100] if content else content
+    view = None
+    if components:
+        view = disnake.ui.View(timeout=None)
+        for component in components:
+            view.add_item(component)
+    if isinstance(ctx, disnake.MessageInteraction) and not ctx.response.is_done():
         logger.debug(f"Editing origin {content_debug=} {embed=} {components=}")
-        await ctx.edit_origin(content=content, embed=embed, components=components)
+        kwargs = {}
+        if content is not None:
+            kwargs["content"] = content
+        if embed is not None:
+            kwargs["embed"] = embed
+        elif embeds is not None:
+            kwargs["embeds"] = embeds
+        if view is not None:
+            kwargs["view"] = view
+        if file is not None:
+            kwargs.update(file=file, attachments=[])
+        await ctx.response.edit_message(**kwargs)
+        return await ctx.original_response()
     else:
         logger.debug(f"Sending {content} {embed=} {components=}")
-        await ctx.send(
-            content=content,
-            embed=embed,
-            components=components,
-            embeds=embeds,
-            ephemeral=ephemeral,
-        )
+        sender = ctx.followup.send if ctx.response.is_done() else ctx.response.send_message
+        kwargs = {"ephemeral": ephemeral}
+        if content is not None:
+            kwargs["content"] = content
+        if view is not None:
+            kwargs["view"] = view
+        if embed is not None:
+            kwargs["embed"] = embed
+        elif embeds is not None:
+            kwargs["embeds"] = embeds
+        if file is not None:
+            kwargs["file"] = file
+        if ctx.response.is_done():
+            kwargs["wait"] = True
+            return await sender(**kwargs)
+        await sender(**kwargs)
+        return await ctx.original_response()
 
 
-async def owner_send(ctx: interactions.InteractionContext, content: str):
+async def owner_send(ctx: Context, content: str):
     await send(ctx, content, ephemeral=True)
 
 
-async def search(ctx: interactions.InteractionContext, query: str, max_results: int):
+async def search(ctx: Context, query: str, max_results: int):
     logger.debug(f"Searching for {query}")
-    results = youtube.search(query, max_results)
+    await defer(ctx)
+    results = await asyncio.to_thread(youtube.search, query, max_results)
     if not results:
         await send(ctx, "No results found")
+        return
 
     search_results.extend(results)
     for result in results:
@@ -87,9 +104,9 @@ async def search(ctx: interactions.InteractionContext, query: str, max_results: 
         await send(ctx, embed=embed, components=components)
 
 
-async def send_error(ctx: interactions.InteractionContext, exception: Exception):
+async def send_error(ctx: Context, exception: Exception):
     logger.error(exception)
-    embed = interactions.Embed(
+    embed = disnake.Embed(
         title="Error",
         description=f"{exception}",
         color=0xFF0000,
@@ -98,26 +115,19 @@ async def send_error(ctx: interactions.InteractionContext, exception: Exception)
 
 
 def get_author_voice_state(
-    ctx: interactions.InteractionContext,
-) -> interactions.VoiceState | None:
-    if isinstance(ctx.author, interactions.User):
-        raise DiscordException("Author is User instead of Member")
-
-    author_voice_state = ctx.author.voice
-    return author_voice_state
+    ctx: Context,
+) -> disnake.VoiceState | None:
+    return getattr(ctx.author, "voice", None)
 
 
-async def handle_next_song(ctx: interactions.InteractionContext):
+async def handle_next_song(
+    ctx: Context, voice_client: disnake.VoiceClient, generation: int
+):
     logger.debug("Handling next song")
     global player
     if not player:
         return
-    player_buffer = player
-    download_then_play_thread(
-        song_queue.next, ctx, asyncio.get_running_loop(), only_download=True
-    )
-    await player_buffer._stopped.wait()
-    if player_buffer != player:
+    if voice_client != player or generation != playback_generation:
         logger.debug("Player changed")
         return
     if config.loop:
@@ -135,30 +145,25 @@ async def handle_next_song(ctx: interactions.InteractionContext):
 
 
 async def play_song_in_voice_channel(
-    ctx: interactions.InteractionContext,
+    ctx: Context,
     song: youtube.SongMetadata,
     file_path: Path,
     user_invoked=True,
 ):
     logger.debug(f"Playing {file_path}")
-    global player
-    if player:
-        await stop_player(False)
-    if isinstance(ctx.author, interactions.User):
-        raise DiscordException("Author is User instead of Member")
-
+    global player, playback_generation
     author_voice_state = get_author_voice_state(ctx)
 
     if not author_voice_state:
         logger.debug("Author not in channel")
-        if player and player.state.connected:
+        if player and player.is_connected():
             if user_invoked:
                 logger.debug(
-                    f"Telling author to join {player.state.channel.name} voice channel"
+                    f"Telling author to join {player.channel.name} voice channel"
                 )
                 await send(
                     ctx,
-                    f"Please join `{player.state.channel.name}` voice channel first",
+                    f"Please join `{player.channel.name}` voice channel first",
                 )
             else:
                 logger.debug("Author left channel, stopping player")
@@ -170,24 +175,48 @@ async def play_song_in_voice_channel(
 
         return
 
-    voice_state = await author_voice_state.channel.connect()
-    logger.debug(f"Voice state {voice_state}")
+    channel = author_voice_state.channel
+    logger.debug("Connecting to voice channel %s", channel.id)
+    try:
+        if player and player.is_connected():
+            if player.channel != channel:
+                await player.move_to(channel)
+            voice_state = player
+        else:
+            voice_state = await asyncio.wait_for(channel.connect(), timeout=20)
+    except TimeoutError as exc:
+        raise DiscordException(
+            "Discord voice connection timed out after 20 seconds. "
+            "The song downloaded successfully, but the voice handshake failed. "
+            "Check the bot's Connect/Speak permissions and voice-library compatibility."
+        ) from exc
+    logger.debug(f"Voice client {voice_state}")
 
     song_queue.current = song
     logger.debug(f"Current song: {song_queue.current}")
-    audio = AudioVolume(file_path)
+    audio = disnake.PCMVolumeTransformer(
+        disnake.FFmpegPCMAudio(str(file_path)), volume=config.volume_audio
+    )
     logger.debug(f"Volume audio: {config.volume_audio}")
-    await stop_player(disconnect=False)
-    voice_state = ctx.voice_state
-    player = Player(audio=audio, v_state=voice_state, loop=asyncio.get_running_loop())
-    player.play()
-    asyncio.create_task(handle_next_song(ctx))
-    # Volume can only be set after the player is playing for some reason
-    set_player_current_audio_volume()
+    playback_generation += 1
+    generation = playback_generation
+    if voice_state.is_playing() or voice_state.is_paused():
+        voice_state.stop()
+    player = voice_state
+    event_loop = asyncio.get_running_loop()
+
+    def after_playback(error: Exception | None):
+        if error:
+            logger.error("Voice playback failed: %s", error)
+        asyncio.run_coroutine_threadsafe(
+            handle_next_song(ctx, voice_state, generation), event_loop
+        )
+
+    voice_state.play(audio, after=after_playback)
     await now_playing(ctx)
 
 
-def append_to_queue(ctx: interactions.InteractionContext, song: youtube.SongMetadata):
+def append_to_queue(ctx: Context, song: youtube.SongMetadata):
     song_queue.append(song)
     if not song_queue.current:
         return
@@ -205,7 +234,7 @@ def append_to_queue(ctx: interactions.InteractionContext, song: youtube.SongMeta
 
 
 async def load_title_or_url(
-    title_or_url: str, ctx: interactions.InteractionContext, should_show_queue: bool, should_defer=True
+    title_or_url: str, ctx: Context, should_show_queue: bool, should_defer=True
 ):
 
     if should_defer:
@@ -251,7 +280,7 @@ async def load_title_or_url(
             await send(ctx, embed=embed)
 
 
-async def play(title_or_url: str, ctx: interactions.InteractionContext):
+async def play(title_or_url: str, ctx: Context):
     logger.debug(f"Play {title_or_url}")
     await clear_queue(ctx, is_user_invoked=False, disconnect_player=False)
     is_first = True
@@ -265,26 +294,26 @@ async def play(title_or_url: str, ctx: interactions.InteractionContext):
             )
 
 
-async def queue(title_or_url: str, ctx: interactions.InteractionContext):
+async def queue(title_or_url: str, ctx: Context):
     logger.debug(f"Queue {title_or_url}")
     async for _ in load_title_or_url(title_or_url, ctx, should_show_queue=True):
         pass
 
 
-async def favourite(url: str, ctx: interactions.InteractionContext):
+async def favourite(url: str, ctx: Context):
     logger.debug(f"Favourite {url}")
     async for song in load_title_or_url(url, ctx, should_show_queue=False, should_defer=False):
         config.append_favourite(song)
     await now_playing(ctx)
 
 
-async def unfavourite(url: str, ctx: interactions.InteractionContext):
+async def unfavourite(url: str, ctx: Context):
     logger.debug(f"Unfavourite {url}")
     config.remove_favourite(url)
     await now_playing(ctx)
 
 
-async def show_favourites(ctx: interactions.InteractionContext):
+async def show_favourites(ctx: Context):
     logger.debug("Show favourites")
     if not config.favourites:
         await send(ctx, "No favourites")
@@ -293,15 +322,10 @@ async def show_favourites(ctx: interactions.InteractionContext):
     favourites_list = [
         f"**{i+1}.** {song['title']}" for i, song in enumerate(config.favourites)
     ]
-    paginator = Paginator.create_from_list(
-        bot, favourites_list, page_size=PAGINATOR_PAGE_SIZE
-    )
-    paginator.show_first_button = False
-    paginator.show_last_button = False
-    await send(ctx, paginator=paginator)
+    await send_lines(ctx, favourites_list)
 
 
-async def play_favourites(ctx: interactions.InteractionContext):
+async def play_favourites(ctx: Context):
     logger.debug("Play favourites")
     if not config.favourites:
         await send(ctx, "No favourites")
@@ -315,25 +339,25 @@ async def play_favourites(ctx: interactions.InteractionContext):
     download_then_play_thread(song_queue.current, ctx, asyncio.get_running_loop())
 
 
-async def pause(ctx: interactions.InteractionContext):
+async def pause(ctx: Context):
     logger.debug("Pause")
-    if not player or player.paused or not song_queue.current:
+    if not player or player.is_paused() or not song_queue.current:
         await send(ctx, "No song is currently playing")
         return
     player.pause()
     await now_playing(ctx, "Paused")
 
 
-async def defer(ctx: interactions.InteractionContext):
-    if not ctx.deferred and not ctx.responded:
-        await ctx.defer()
+async def defer(ctx: Context):
+    if not ctx.response.is_done():
+        await ctx.response.defer()
 
 
-async def resume(ctx: interactions.InteractionContext):
+async def resume(ctx: Context):
     logger.debug("Resume")
     if song_queue.current:
         if player:
-            if not player.paused:
+            if not player.is_paused():
                 await send(ctx, "Already playing")
                 return
             player.resume()
@@ -353,19 +377,17 @@ async def resume(ctx: interactions.InteractionContext):
         await now_playing(ctx)
 
 
-async def send_volume_control(ctx: interactions.InteractionContext):
+async def send_volume_control(ctx: Context):
     text, buttons = volume_control_component(config)
     await send(ctx, text, components=buttons)
 
 
 def set_player_current_audio_volume():
-    global player
-    if player and player.current_audio:
-        player.current_audio = cast(AudioVolume, player.current_audio)
-        player.current_audio.volume = config.volume_audio
+    if player and isinstance(player.source, disnake.PCMVolumeTransformer):
+        player.source.volume = config.volume_audio
 
 
-async def set_volume(ctx: interactions.InteractionContext, volume: int):
+async def set_volume(ctx: Context, volume: int):
     if volume < 0 or volume > 100:
         await send(ctx, "Volume must be between 0% and 100%")
         return
@@ -374,7 +396,7 @@ async def set_volume(ctx: interactions.InteractionContext, volume: int):
     await send_volume_control(ctx)
 
 
-async def increase_volume(ctx: interactions.InteractionContext):
+async def increase_volume(ctx: Context):
     if config.volume >= 100:
         await send(ctx, "Volume is already at maximum")
         return
@@ -384,7 +406,7 @@ async def increase_volume(ctx: interactions.InteractionContext):
     await set_volume(ctx, new_volume)
 
 
-async def decrease_volume(ctx: interactions.InteractionContext):
+async def decrease_volume(ctx: Context):
     if config.volume <= 0:
         await send(ctx, "Volume is already at minimum")
         return
@@ -394,7 +416,7 @@ async def decrease_volume(ctx: interactions.InteractionContext):
     await set_volume(ctx, new_volume)
 
 
-async def mute(ctx: interactions.InteractionContext):
+async def mute(ctx: Context):
     logger.debug("Mute")
     if config.mute:
         await send(ctx, "Already muted")
@@ -404,18 +426,17 @@ async def mute(ctx: interactions.InteractionContext):
     await send_volume_control(ctx)
 
 
-async def unmute(ctx: interactions.InteractionContext):
+async def unmute(ctx: Context):
     logger.debug("Unmute")
     if not config.mute:
         await send(ctx, "Already unmuted")
         return
     config.mute = False
-    if player and player.current_audio:
-        player.current_audio.volume = config.volume_audio  # type: ignore
+    set_player_current_audio_volume()
     await send_volume_control(ctx)
 
 
-async def next_(ctx: interactions.InteractionContext, user_invoked=True):
+async def next_(ctx: Context, user_invoked=True):
     logger.debug("Next")
     if not song_queue.current:
         if user_invoked:
@@ -431,7 +452,7 @@ async def next_(ctx: interactions.InteractionContext, user_invoked=True):
     )
 
 
-async def previous(ctx: interactions.InteractionContext):
+async def previous(ctx: Context):
     logger.debug("Previous")
     if not song_queue.current:
         await send(ctx, "No song in queue")
@@ -447,19 +468,20 @@ async def previous(ctx: interactions.InteractionContext):
 
 async def stop_player(disconnect: bool):
     logger.debug("Stopping player")
-    global player
+    global player, playback_generation
     if not player:
         return
     player_buffer = player
     player = None
+    playback_generation += 1
     if player_buffer:
         player_buffer.stop()
-        if disconnect and player_buffer.state.connected:
-            await player_buffer.state.disconnect()
+        if disconnect and player_buffer.is_connected():
+            await player_buffer.disconnect(force=True)
 
 
 async def clear_queue(
-    ctx: interactions.InteractionContext, is_user_invoked=True, disconnect_player=True
+    ctx: Context, is_user_invoked=True, disconnect_player=True
 ):
     logger.debug("Clear queue")
     if not song_queue.current and is_user_invoked:
@@ -471,20 +493,23 @@ async def clear_queue(
         await send(ctx, "Queue cleared")
 
 
-def get_current_song_page_index(paginator: Paginator) -> int:
-    line_count_so_far = 0
-    current_song_line = song_queue.current_index + 1
-    for page_index, page in enumerate(paginator.pages):
-        if not isinstance(page, Page):
-            continue
-        page_lines = page.content.splitlines()
-        line_count_so_far += len(page_lines)
-        if current_song_line <= line_count_so_far:
-            return page_index
-    raise DiscordException("Failed to get current song page index")
+async def send_lines(ctx: Context, lines: list[str]):
+    pages: list[str] = []
+    page = ""
+    for line in lines:
+        candidate = f"{page}\n{line}" if page else line
+        if len(candidate) > PAGINATOR_PAGE_SIZE:
+            pages.append(page)
+            page = line
+        else:
+            page = candidate
+    if page:
+        pages.append(page)
+    for page in pages:
+        await send(ctx, page)
 
 
-async def show_queue(ctx: interactions.InteractionContext):
+async def show_queue(ctx: Context):
     logger.debug("Show queue")
     if not song_queue.current:
         await send(ctx, "Queue is empty")
@@ -492,7 +517,7 @@ async def show_queue(ctx: interactions.InteractionContext):
 
     if not player:
         playback_status = "⏹️"
-    elif player.paused:
+    elif player.is_paused():
         playback_status = "⏸️"
     else:
         playback_status = "▶️"
@@ -502,34 +527,29 @@ async def show_queue(ctx: interactions.InteractionContext):
         else f"**{i+1}.** {song['title']}"
         for i, song in enumerate(song_queue.queue)
     ]
-    page_size = 1500
-    paginator = Paginator.create_from_list(bot, queue_list, page_size=page_size)
-    paginator.show_first_button = False
-    paginator.show_last_button = False
-    paginator.page_index = get_current_song_page_index(paginator)
-    await send(ctx, paginator=paginator)
+    await send_lines(ctx, queue_list)
 
 
-async def loop(ctx: interactions.InteractionContext):
+async def loop(ctx: Context):
     logger.debug("Loop")
     config.loop = True
     await now_playing(ctx)
 
 
-async def unloop(ctx: interactions.InteractionContext):
+async def unloop(ctx: Context):
     logger.debug("Unloop")
     config.loop = False
     await now_playing(ctx)
 
 
-async def shuffle(ctx: interactions.InteractionContext):
+async def shuffle(ctx: Context):
     logger.debug("Shuffle")
     song_queue.shuffle()
     await show_queue(ctx)
 
 
 async def is_valid_song_number(
-    ctx: interactions.InteractionContext, song_number: int
+    ctx: Context, song_number: int
 ) -> bool:
     if song_number < 1 or song_number > len(song_queue.queue):
         await send(ctx, "Invalid song number")
@@ -538,7 +558,7 @@ async def is_valid_song_number(
     return True
 
 
-async def dequeue(ctx: interactions.InteractionContext, song_number: int):
+async def dequeue(ctx: Context, song_number: int):
     logger.debug(f"Dequeue {song_number}")
     if not song_queue.current:
         await send(ctx, "No song in queue")
@@ -546,7 +566,7 @@ async def dequeue(ctx: interactions.InteractionContext, song_number: int):
     if not await is_valid_song_number(ctx, song_number):
         return
     index = song_number - 1
-    was_playing = player is not None and not player.paused
+    was_playing = player is not None and player.is_playing()
     should_resume = False
     if index == song_queue.current_index:
         if len(song_queue.queue) > 1:
@@ -560,30 +580,31 @@ async def dequeue(ctx: interactions.InteractionContext, song_number: int):
         await resume(ctx)
 
 
-async def dequeue_next(ctx: interactions.InteractionContext):
+async def dequeue_next(ctx: Context):
     logger.debug("Dequeue next")
     await dequeue(ctx, song_queue.next_index + 1)
 
 
-async def dequeue_previous(ctx: interactions.InteractionContext):
+async def dequeue_previous(ctx: Context):
     logger.debug("Dequeue previous")
     await dequeue(ctx, song_queue.previous_index + 1)
 
 
-async def dequeue_current(ctx: interactions.InteractionContext):
+async def dequeue_current(ctx: Context):
     logger.debug("Dequeue current")
     await dequeue(ctx, song_queue.current_index + 1)
 
 
 async def now_playing(
-    ctx: interactions.InteractionContext,
+    ctx: Context,
     footer="Now playing",
 ):
     logger.debug("Now playing")
     if not song_queue.current or not player:
         await send(ctx, "No song is currently playing")
         return
-    embed, buttons = now_playing_component(song_queue.current, player, config, footer)
+    song = song_queue.current
+    embed, buttons = now_playing_component(song, player, config, footer)
     await send(
         ctx,
         embed=embed,
@@ -591,22 +612,22 @@ async def now_playing(
     )
 
 
-async def stop(ctx: interactions.InteractionContext):
+async def stop(ctx: Context):
     logger.debug("Stop")
     if not player:
         await send(ctx, "No song is currently playing")
         return
 
     await stop_player(True)
-    await ctx.send("Stopped the current song")
+    await send(ctx, "Stopped the current song")
 
 
-async def repo(ctx: interactions.InteractionContext):
+async def repo(ctx: Context):
     logger.debug("Repo")
     await send(ctx, f"You can find the source code for this bot at {REPO}")
 
 
-async def creator(ctx: interactions.InteractionContext):
+async def creator(ctx: Context):
     logger.debug("Creator")
     await send(
         ctx,
@@ -614,7 +635,7 @@ async def creator(ctx: interactions.InteractionContext):
     )
 
 
-async def reset_cache(ctx: interactions.InteractionContext):
+async def reset_cache(ctx: Context):
     logger.debug("Reset cache")
     await stop_player(True)
     for cache in Cache.all:
@@ -624,7 +645,7 @@ async def reset_cache(ctx: interactions.InteractionContext):
     await owner_send(ctx, "Successfully reset all caches")
 
 
-async def metrics(ctx: interactions.InteractionContext):
+async def metrics(ctx: Context):
     logger.debug("Metrics")
     folder_metrics = youtube.download_folder_metrics()
     content = f"Downloads folder size: {folder_metrics.size_mbs:.2f} MB\nSize limit: {folder_metrics.size_limit_mbs} MB\nTotal downloads: {folder_metrics.total_downloads}"
@@ -634,7 +655,7 @@ async def metrics(ctx: interactions.InteractionContext):
     )
 
 
-async def skip_to(ctx: interactions.InteractionContext, song_number: int):
+async def skip_to(ctx: Context, song_number: int):
     logger.debug(f"Skip to {song_number}")
     if not song_queue.current:
         await send(ctx, "No song in queue")
@@ -646,7 +667,7 @@ async def skip_to(ctx: interactions.InteractionContext, song_number: int):
     await resume(ctx)
 
 
-async def random_(ctx: interactions.InteractionContext):
+async def random_(ctx: Context):
     logger.debug("Random")
     await defer(ctx)
     all_songs: list[youtube.SongMetadata] = []
@@ -666,48 +687,43 @@ async def random_(ctx: interactions.InteractionContext):
     await resume(ctx)
 
 
-async def stop_bot(ctx: interactions.InteractionContext):
+async def stop_bot(ctx: Context):
     logger.debug("Stop bot")
     await owner_send(ctx, "Stopping bot")
     await stop_player(True)
-    await bot.stop()
+    await bot.close()
 
 
-async def restart_bot(ctx: interactions.InteractionContext):
+async def restart_bot(ctx: Context):
     logger.debug("Restart bot")
-    global bot_restarted
-    bot_restarted[0] = True
     await owner_send(ctx, "Restarting bot")
-    await stop_bot(ctx)
+    await stop_player(True)
+    await bot.close()
+    os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 def download_then_play_thread(
     song: youtube.SongMetadata,
-    ctx: interactions.InteractionContext,
+    ctx: Context,
     event_loop: asyncio.AbstractEventLoop,
     only_download=False,
     user_invoked=True,
 ):
-    def thread_func():
-        nonlocal song
+    async def download_and_play():
         try:
-            file_path, song = youtube.download_single(song["url"], song["id"])
-        except youtube.YoutubeException as e:
-            asyncio.run_coroutine_threadsafe(
-                send_error(ctx, e),
-                event_loop,
+            file_path, metadata = await asyncio.to_thread(
+                youtube.download_single, song["url"], song["id"]
             )
-        else:
             if not only_download:
-                asyncio.run_coroutine_threadsafe(
-                    play_song_in_voice_channel(
-                        ctx,
-                        song,
-                        file_path=file_path,
-                        user_invoked=user_invoked,
-                    ),
-                    event_loop,
+                await play_song_in_voice_channel(
+                    ctx, metadata, file_path=file_path, user_invoked=user_invoked
                 )
+        except Exception as exc:
+            logger.exception("Download or playback failed for %s", song["id"])
+            if user_invoked and not only_download:
+                try:
+                    await send_error(ctx, exc)
+                except Exception:
+                    logger.exception("Could not send playback error to Discord")
 
-    thread = threading.Thread(target=thread_func)
-    thread.start()
+    return asyncio.run_coroutine_threadsafe(download_and_play(), event_loop)

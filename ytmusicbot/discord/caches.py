@@ -106,8 +106,10 @@ class SongQueue(Cache[Literal["data"], SongQueueData]):
     def current(self, value: youtube.SongMetadata):
         for idx, song in enumerate(self.queue):
             if song["id"] == value["id"]:
-                logger.debug(f"Setting current song to {song}")
+                logger.debug(f"Setting current song to {value}")
+                self.queue[idx] = value
                 self.current_index = idx
+                self.save()
                 return
         logger.debug(f"Song {value} not found in queue")
         raise DiscordException(f"Song {value} not found in queue")

@@ -4,9 +4,9 @@ import re
 import shutil
 import subprocess
 import time
-from typing import Any, Generator, NamedTuple, NotRequired, TypedDict, cast
+import urllib.parse
+from typing import Any, Generator, NamedTuple, NotRequired, TypedDict
 import yt_dlp
-from youtube_search import YoutubeSearch
 from pathlib import Path
 from ytmusicbot.common.main import Cache, load_dotenv, logger, cache_dir
 import sys
@@ -86,22 +86,64 @@ def list_contains_song(song_list: list[SongMetadata], song: SongMetadata) -> boo
     return False
 
 
-def search(query: str, max_results: int | None = None) -> list[SongMetadata]:
-    yts_results = cast(
-        list[dict[str, Any]], YoutubeSearch(query, max_results=max_results).to_dict()
-    )
-    results = []
-    for result in yts_results:
-        metadata = info_to_song_metadata(result, is_search_info=True)
-        # Preserve an explicit playlist result so callers can choose whether to
-        # include it. Ordinary video and Mix URLs remain canonicalized to avoid
-        # accidentally downloading a whole generated playlist.
-        search_url = f"{YOUTUBE_HOME_URL}{result['url_suffix']}"
-        if get_id(search_url)[1] and "start_radio=" not in search_url:
-            metadata["url"] = search_url
+def search(
+    query: str,
+    max_results: int | None = 10,
+    include_playlists: bool = False,
+) -> list[SongMetadata]:
+    limit = max_results if max_results is not None else 10
+    if limit < 1:
+        return []
+
+    if include_playlists:
+        encoded_query = urllib.parse.urlencode({"search_query": query})
+        search_url = f"{YOUTUBE_HOME_URL}/results?{encoded_query}"
+    else:
+        search_url = f"ytsearch{limit}:{query}"
+
+    try:
+        search_info = search_youtube_dl.extract_info(search_url, download=False)
+    except yt_dlp.utils.YoutubeDLError as error:
+        raise YoutubeException(
+            f'YouTube search failed for "{query}": {error}'
+        ) from error
+
+    entries = search_info.get("entries", []) if search_info else []
+    results: list[SongMetadata] = []
+    for entry in entries:
+        if not entry or not entry.get("id") or not entry.get("title"):
+            continue
+        url = entry.get("url") or entry.get("webpage_url") or ""
+        video_id, is_playlist = get_id(url)
+        is_playlist_result = entry.get("_type") == "playlist" or "/playlist?" in url
+        if is_playlist_result and is_playlist:
+            if not include_playlists:
+                continue
+            result_url = url
+        elif video_id:
+            result_url = canonical_video_url(video_id)
+        else:
+            # Ignore channel and other non-playable search results.
+            continue
+
+        thumbnails = entry.get("thumbnails") or []
+        thumbnail_url = entry.get("thumbnail") or ""
+        if not thumbnail_url and thumbnails:
+            thumbnail_url = thumbnails[-1].get("url", "")
+        metadata: SongMetadata = {
+            "id": entry["id"],
+            "title": entry["title"],
+            "url": result_url,
+            "thumbnail_url": thumbnail_url,
+        }
+        if isinstance(entry.get("duration"), (int, float)):
+            metadata["duration"] = float(entry["duration"])
         results.append(metadata)
+        if len(results) >= limit:
+            break
+
     logger.debug(
-        f"Search results for: query={query}, max_results={max_results}: {yts_results}"
+        "Search results for query=%r, max_results=%s: %s", query, limit, results
     )
     return results
 
@@ -226,8 +268,14 @@ def get_media_duration(file_path: Path) -> float | None:
     try:
         result = subprocess.run(
             [
-                "ffprobe", "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", str(file_path),
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(file_path),
             ],
             capture_output=True,
             text=True,
@@ -293,6 +341,15 @@ elif cookie_browser := os.getenv("YTDLP_COOKIES_FROM_BROWSER"):
     opts["cookiesfrombrowser"] = (cookie_browser, None, None, None)
 
 youtube_dl = yt_dlp.YoutubeDL(opts)
+search_youtube_dl = yt_dlp.YoutubeDL(
+    {
+        **opts,
+        "extract_flat": "in_playlist",
+        "skip_download": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+)
 
 
 def get_songs_in_playlist(

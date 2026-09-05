@@ -23,6 +23,8 @@ server_ids = os.getenv("SERVER_IDS")
 if not server_ids:
     raise DiscordException("Server IDs not found in environment variables")
 scopes: Any = server_ids.split(",")
+
+
 def make_bot():
     intents = disnake.Intents.default()
     intents.voice_states = True

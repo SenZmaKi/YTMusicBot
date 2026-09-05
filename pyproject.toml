@@ -1,0 +1,32 @@
+[project]
+name = "ytmusicbot"
+version = "0.1.0"
+description = "A Discord bot for playing music from YouTube"
+readme = "README.md"
+requires-python = ">=3.12.7"
+dependencies = [
+    "disnake[voice]==2.12.1",
+    "pillow==12.3.0",
+    "python-dotenv==1.1.1",
+    "yt-dlp[default]==2026.8.19",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit==4.3.0",
+    "pytest==8.3.4",
+    "ruff==0.14.2",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

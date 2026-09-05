@@ -14,8 +14,7 @@ def test_search_metadata_uses_canonical_url():
             "id": video_id,
             "title": "Example",
             "url_suffix": (
-                f"/watch?v={video_id}&list=RD{video_id}"
-                "&start_radio=1&pp=tracking-data"
+                f"/watch?v={video_id}&list=RD{video_id}&start_radio=1&pp=tracking-data"
             ),
             "thumbnails": ["https://example.com/thumbnail.jpg"],
         },

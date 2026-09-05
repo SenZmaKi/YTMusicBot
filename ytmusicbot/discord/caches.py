@@ -28,7 +28,15 @@ class Config(Cache[Literal["data"], ConfigData]):
         super().__init__(
             name,
             logger,
-            {"data": {"volume": 50, "loop": False, "repeat_mode": "off", "mute": False, "favourites": []}},
+            {
+                "data": {
+                    "volume": 50,
+                    "loop": False,
+                    "repeat_mode": "off",
+                    "mute": False,
+                    "favourites": [],
+                }
+            },
         )
         data = self["data"]
         if "repeat_mode" not in data:
@@ -272,7 +280,9 @@ class UrlMappingEntry(TypedDict):
 
 
 class UrlMapping(Cache[Literal["data"], dict[str, UrlMappingEntry]]):
-    cache_lifetime = int(os.getenv("SONG_URLS_CACHE_LIFETIME", 86400))  # 24 hours default
+    cache_lifetime = int(
+        os.getenv("SONG_URLS_CACHE_LIFETIME", 86400)
+    )  # 24 hours default
 
     def __init__(self) -> None:
         super().__init__("url_mapping", logger, {"data": {}})
@@ -281,7 +291,8 @@ class UrlMapping(Cache[Literal["data"], dict[str, UrlMappingEntry]]):
         """Remove expired entries"""
         current_time = time.time()
         expired_keys = [
-            key for key, entry in self["data"].items()
+            key
+            for key, entry in self["data"].items()
             if current_time - entry["timestamp"] > self.cache_lifetime
         ]
         for key in expired_keys:

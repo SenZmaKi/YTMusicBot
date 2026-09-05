@@ -23,8 +23,12 @@ def render_progress(position: float, duration: float) -> BytesIO:
     draw.text((12, 5), label, fill=(185, 187, 190, 255), font=font)
     left, right, y = 12, width - 12, 55
     handle_x = round(left + (right - left) * ratio)
-    draw.rounded_rectangle((left, y - 4, right, y + 4), radius=4, fill=(78, 80, 88, 255))
-    draw.rounded_rectangle((left, y - 4, handle_x, y + 4), radius=4, fill=(35, 165, 245, 255))
+    draw.rounded_rectangle(
+        (left, y - 4, right, y + 4), radius=4, fill=(78, 80, 88, 255)
+    )
+    draw.rounded_rectangle(
+        (left, y - 4, handle_x, y + 4), radius=4, fill=(35, 165, 245, 255)
+    )
     draw.ellipse((handle_x - 8, y - 8, handle_x + 8, y + 8), fill=(245, 245, 245, 255))
 
     output = BytesIO()

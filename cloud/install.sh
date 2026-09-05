@@ -15,23 +15,19 @@ done
 
 sudo apt update -y
 sudo apt install git -y
-sudo apt install python3.12 -y
-sudo apt install python3.12-venv -y
 sudo apt install ffmpeg -y
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 
 git clone https://github.com/SenZmaKi/YTMusicBot.git
 cd YTMusicBot
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv sync
 if [ "$TEST" = true ]; then
-    pip install -r dev-requirements.txt
-    pytest -s -v
+    uv run python -m pytest -s -v
 else
-    python3.12 -m ytmusicbot.youtube --configure-random-songs
+    uv run python -m ytmusicbot.youtube --configure-random-songs
 fi
 
-deactivate
 if [ -f "../.env" ]; then
   mv ../.env .env
 fi

@@ -23,6 +23,7 @@ from ytmusicbot.discord.caches import Config, SearchResults, SongQueue
 from ytmusicbot.discord.progress import render_progress
 import ytmusicbot.youtube as youtube
 from ytmusicbot.common.main import REPO, CREATOR_NAME, CREATOR_DISCORD_CHAT_URL, Cache
+
 Context = disnake.ApplicationCommandInteraction | disnake.MessageInteraction
 
 
@@ -125,7 +126,9 @@ async def send(
         return await ctx.original_response()
     else:
         logger.debug(f"Sending {content} {embed=} {components=}")
-        sender = ctx.followup.send if ctx.response.is_done() else ctx.response.send_message
+        sender = (
+            ctx.followup.send if ctx.response.is_done() else ctx.response.send_message
+        )
         kwargs = {"ephemeral": ephemeral}
         if content is not None:
             kwargs["content"] = content
@@ -156,14 +159,9 @@ async def search(
 ):
     logger.debug(f"Searching for {query}")
     await defer(ctx)
-    results = await asyncio.to_thread(youtube.search, query, None)
-    if not results:
-        await send(ctx, "No results found")
-        return
-
-    if not include_playlists:
-        results = [result for result in results if not youtube.get_id(result["url"])[1]]
-    results = results[:max_results]
+    results = await asyncio.to_thread(
+        youtube.search, query, max_results, include_playlists
+    )
     if not results:
         await send(ctx, "No results found")
         return
@@ -252,7 +250,9 @@ async def play_song_in_voice_channel(
 
         return
 
-    channel = author_voice_state.channel if author_voice_state else session.player.channel
+    channel = (
+        author_voice_state.channel if author_voice_state else session.player.channel
+    )
     logger.debug("Connecting to voice channel %s", channel.id)
     try:
         # stop_player(disconnect=False) invalidates session.player so stale
@@ -346,7 +346,9 @@ async def resolve_songs(title_or_url: str) -> list[youtube.SongMetadata]:
         if not id:
             raise DiscordException(f"Invalid url {title_or_url}")
     if is_playlist:
-        songs = await asyncio.to_thread(lambda: list(youtube.get_songs_in_playlist(title_or_url)))
+        songs = await asyncio.to_thread(
+            lambda: list(youtube.get_songs_in_playlist(title_or_url))
+        )
         search_results.extend(songs)
         return songs
     song = search_results.get(id)
@@ -371,14 +373,15 @@ async def play(title_or_url: str, ctx: Context):
     await stop_player(session, False)
     session.song_queue.clear()
     session.song_queue.extend(songs)
-    await play_song_in_voice_channel(ctx, session, metadata, file_path, user_invoked=True)
+    await play_song_in_voice_channel(
+        ctx, session, metadata, file_path, user_invoked=True
+    )
 
 
 async def queue(title_or_url: str, ctx: Context):
     logger.debug(f"Queue {title_or_url}")
     await defer(ctx)
     songs = await resolve_songs(title_or_url)
-    session = get_session(ctx)
     for song in songs:
         append_to_queue(ctx, song)
     if len(songs) == 1:
@@ -418,7 +421,7 @@ async def show_favourites(ctx: Context):
         return
 
     favourites_list = [
-        f"**{i+1}.** {song['title']}" for i, song in enumerate(config.favourites)
+        f"**{i + 1}.** {song['title']}" for i, song in enumerate(config.favourites)
     ]
     await send_lines(ctx, favourites_list)
 
@@ -464,13 +467,17 @@ async def resume(ctx: Context):
     logger.debug("Resume")
     session = get_session(ctx)
     if session.song_queue.current:
-        if session.player and (session.player.is_playing() or session.player.is_paused()):
+        if session.player and (
+            session.player.is_playing() or session.player.is_paused()
+        ):
             if not session.player.is_paused():
                 await send(ctx, "Already playing")
                 return
             session.player.resume()
             if session.playback_paused_at is not None:
-                session.playback_paused_total += time.monotonic() - session.playback_paused_at
+                session.playback_paused_total += (
+                    time.monotonic() - session.playback_paused_at
+                )
                 session.playback_paused_at = None
         else:
             await defer(ctx)
@@ -490,7 +497,9 @@ async def send_volume_control(ctx: Context):
 
 
 def set_player_current_audio_volume(session: PlaybackSession):
-    if session.player and isinstance(session.player.source, disnake.PCMVolumeTransformer):
+    if session.player and isinstance(
+        session.player.source, disnake.PCMVolumeTransformer
+    ):
         session.player.source.volume = session.config.volume_audio
 
 
@@ -595,9 +604,7 @@ async def stop_player(session: PlaybackSession, disconnect: bool):
             await player_buffer.disconnect(force=True)
 
 
-async def clear_queue(
-    ctx: Context, is_user_invoked=True, disconnect_player=True
-):
+async def clear_queue(ctx: Context, is_user_invoked=True, disconnect_player=True):
     logger.debug("Clear queue")
     session = get_session(ctx)
     if not session.song_queue.current and is_user_invoked:
@@ -632,16 +639,18 @@ async def show_queue(ctx: Context):
         await send(ctx, "Queue is empty")
         return
 
-    if not session.player or not (session.player.is_playing() or session.player.is_paused()):
+    if not session.player or not (
+        session.player.is_playing() or session.player.is_paused()
+    ):
         playback_status = "⏹️"
     elif session.player.is_paused():
         playback_status = "⏸️"
     else:
         playback_status = "▶️"
     queue_list = [
-        f"**{i+1}.** ***{playback_status} {song['title']}***"
+        f"**{i + 1}.** ***{playback_status} {song['title']}***"
         if i == session.song_queue.current_index
-        else f"**{i+1}.** {song['title']}"
+        else f"**{i + 1}.** {song['title']}"
         for i, song in enumerate(session.song_queue.queue)
     ]
     await send_lines(ctx, queue_list)
@@ -671,9 +680,7 @@ async def shuffle(ctx: Context):
     await show_queue(ctx)
 
 
-async def is_valid_song_number(
-    ctx: Context, song_number: int
-) -> bool:
+async def is_valid_song_number(ctx: Context, song_number: int) -> bool:
     if song_number < 1 or song_number > len(get_session(ctx).song_queue.queue):
         await send(ctx, "Invalid song number")
         await show_queue(ctx)
@@ -722,11 +729,17 @@ async def dequeue_current(ctx: Context):
 def playback_position(session: PlaybackSession) -> float:
     if not session.playback_started_at:
         return 0.0
-    end = session.playback_paused_at if session.playback_paused_at is not None else time.monotonic()
+    end = (
+        session.playback_paused_at
+        if session.playback_paused_at is not None
+        else time.monotonic()
+    )
     return max(0.0, end - session.playback_started_at - session.playback_paused_total)
 
 
-def progress_file(session: PlaybackSession, song: youtube.SongMetadata) -> disnake.File | None:
+def progress_file(
+    session: PlaybackSession, song: youtube.SongMetadata
+) -> disnake.File | None:
     duration = song.get("duration")
     if not duration:
         return None
@@ -735,10 +748,16 @@ def progress_file(session: PlaybackSession, song: youtube.SongMetadata) -> disna
     )
 
 
-async def refresh_progress_message(session: PlaybackSession, message: disnake.Message, generation: int):
+async def refresh_progress_message(
+    session: PlaybackSession, message: disnake.Message, generation: int
+):
     while generation == session.playback_generation and session.player:
         await asyncio.sleep(10)
-        if generation != session.playback_generation or not session.player or not session.song_queue.current:
+        if (
+            generation != session.playback_generation
+            or not session.player
+            or not session.song_queue.current
+        ):
             return
         song = session.song_queue.current
         file = progress_file(session, song)
@@ -777,7 +796,9 @@ async def now_playing(
         session.progress_task.cancel()
     if session.progress_message and song.get("duration"):
         session.progress_task = asyncio.create_task(
-            refresh_progress_message(session, session.progress_message, session.playback_generation)
+            refresh_progress_message(
+                session, session.progress_message, session.playback_generation
+            )
         )
 
 
@@ -800,7 +821,9 @@ async def publish_now_playing(session: PlaybackSession, footer="Now playing"):
         session.progress_task.cancel()
     if session.progress_message and song.get("duration"):
         session.progress_task = asyncio.create_task(
-            refresh_progress_message(session, session.progress_message, session.playback_generation)
+            refresh_progress_message(
+                session, session.progress_message, session.playback_generation
+            )
         )
 
 
@@ -922,7 +945,11 @@ def start_song(
                 if request_generation != session.request_generation:
                     return
                 await play_song_in_voice_channel(
-                    ctx, session, metadata, file_path=file_path, user_invoked=user_invoked
+                    ctx,
+                    session,
+                    metadata,
+                    file_path=file_path,
+                    user_invoked=user_invoked,
                 )
         except asyncio.CancelledError:
             return
@@ -936,7 +963,9 @@ def start_song(
                 except Exception:
                     logger.exception("Could not send playback error to Discord")
             else:
-                await send_session(session, f"Could not play **{song['title']}**; skipping it.")
+                await send_session(
+                    session, f"Could not play **{song['title']}**; skipping it."
+                )
                 next_index = session.song_queue.current_index + 1
                 if next_index < len(session.song_queue.queue):
                     session.song_queue.current_index = next_index

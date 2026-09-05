@@ -17,7 +17,7 @@ def song_embed_component(
     return disnake.Embed(
         title=song["title"],
         url=song["url"],
-        ).set_thumbnail(url=song["thumbnail_url"])
+    ).set_thumbnail(url=song["thumbnail_url"])
 
 
 def pause_button() -> disnake.ui.Button:

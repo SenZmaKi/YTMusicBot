@@ -59,7 +59,9 @@ class PlaybackTransitionTests(unittest.IsolatedAsyncioTestCase):
         )
         voice_client.move_to = AsyncMock()
         channel = SimpleNamespace(id=42)
-        channel.connect = AsyncMock(side_effect=AssertionError("must reuse voice client"))
+        channel.connect = AsyncMock(
+            side_effect=AssertionError("must reuse voice client")
+        )
         ctx = SimpleNamespace(
             author=SimpleNamespace(voice=SimpleNamespace(channel=channel)),
             guild=SimpleNamespace(voice_client=voice_client),
@@ -79,7 +81,9 @@ class PlaybackTransitionTests(unittest.IsolatedAsyncioTestCase):
         metadata["duration"] = 1.0
         with (
             patch.object(logic.disnake, "FFmpegPCMAudio", return_value=object()),
-            patch.object(logic.disnake, "PCMVolumeTransformer", return_value=transformer),
+            patch.object(
+                logic.disnake, "PCMVolumeTransformer", return_value=transformer
+            ),
             patch.object(logic, "now_playing", AsyncMock()),
         ):
             await logic.play_song_in_voice_channel(

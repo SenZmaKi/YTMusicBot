@@ -39,7 +39,7 @@ A feature rich and blazingly fast Discord bot for playing music from YouTube.
 
 ## Installation
 
-1. Ensure you have [Python 3.12](https://www.python.org/downloads/release/python-3127) and [Git](https://github.com/git-guides/install-git) installed.
+1. Ensure you have [uv](https://docs.astral.sh/uv/getting-started/installation/) and [Git](https://github.com/git-guides/install-git) installed. uv will install the required Python version when needed.
 
 2. Clone the repository:
 
@@ -48,33 +48,13 @@ A feature rich and blazingly fast Discord bot for playing music from YouTube.
    cd YTMusicBot
    ```
 
-3. Create a virtual environment:
+3. Install the locked dependencies:
 
    ```bash
-   python -m venv .venv
+   uv sync
    ```
 
-4. Activate the virtual environment:
-
-   - Windows
-
-   ```bash
-   .venv\Scripts\activate
-   ```
-
-   - Linux/Mac
-
-   ```bash
-   source .venv/bin/activate
-   ```
-
-5. Install the required dependencies:
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-6. Install [FFmpeg](https://www.ffmpeg.org/)
+4. Install [FFmpeg](https://www.ffmpeg.org/)
 
    - Windows
      ```bash
@@ -88,12 +68,12 @@ A feature rich and blazingly fast Discord bot for playing music from YouTube.
 
      Use your distro's package manager
 
-7. [Setup the bot](https://github.com/SenZmaKi/YTMusicBot/tree/master/docs/setup-bot.md)
+5. [Setup the bot](https://github.com/SenZmaKi/YTMusicBot/tree/master/docs/setup-bot.md)
 
-8. Configure random songs:
+6. Configure random songs:
 
    ```bash
-   python -m ytmusicbot.youtube --configure-random-songs
+   uv run python -m ytmusicbot.youtube --configure-random-songs
    ```
 
    - Optionally you can use custom random songs.
@@ -116,13 +96,13 @@ A feature rich and blazingly fast Discord bot for playing music from YouTube.
      - Then run
 
        ```bash
-       python -m ytmusicbot.youtube --configure-random-songs
+       uv run python -m ytmusicbot.youtube --configure-random-songs
        ```
 
-9. Run the bot:
+7. Run the bot:
 
    ```bash
-   python -m ytmusicbot.discord
+   uv run python -m ytmusicbot.discord
    ```
 
 ## Contribution
@@ -163,18 +143,37 @@ The `run.sh` script starts the bot.
 
 The `nohup.sh` script runs the bot in the background.
 
+## Dokploy Deployment
+
+Pushes to `main` run linting, formatting checks, and tests, then publish the
+container image to GitHub Container Registry and trigger a Dokploy deployment.
+
+Add these GitHub Actions repository secrets before pushing:
+
+- `DOKPLOY_URL`: the base URL of your Dokploy instance
+- `DOKPLOY_API_KEY`: a Dokploy API key
+- `DOKPLOY_APP_ID`: the ID of the Dokploy application to deploy
+
+In Dokploy, configure the application to use
+`ghcr.io/<github-owner>/<repository>:latest`. If the package is private, add
+GitHub Container Registry credentials. Configure the bot variables listed
+below in Dokploy, and persist `/app/cache` and `/app/random_songs` if downloads
+and generated random-song data should survive deployments. This bot is a
+long-running worker and does not expose an HTTP port.
+
 ## Testing
 
-1. Install development requirements:
+1. Install development dependencies and the Git hooks:
 
    ```bash
-   pip install -r dev-requirements.txt
+   uv sync --dev
+   uv run pre-commit install
    ```
 
 2. Run tests:
 
    ```bash
-   pytest
+   uv run python -m pytest
    ```
 
 ## [Commands](https://github.com/SenZmaKi/YTMusicBot/blob/master/docs/commands.md)

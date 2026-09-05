@@ -161,6 +161,10 @@ below in Dokploy, and persist `/app/cache` and `/app/random_songs` if downloads
 and generated random-song data should survive deployments. This bot is a
 long-running worker and does not expose an HTTP port.
 
+If YouTube requires authentication, follow the
+[Dokploy cookie setup guide](docs/dokploy-cookies.md) to securely mount a
+Netscape cookie file and configure `YTDLP_COOKIE_FILE`.
+
 ## Testing
 
 1. Install development dependencies and the Git hooks:

@@ -14,6 +14,8 @@ def load_dotenv():
 
 load_dotenv()
 logger = logging.getLogger("ytmusibot")
+logs_dir = Path("logs")
+logs_dir.mkdir(exist_ok=True)
 
 # Windows consoles commonly use cp1252, which cannot encode the emoji used by
 # Discord components. Logging must never interrupt a command just because its
@@ -27,7 +29,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("ytmusibot.log", encoding="utf-8"),
+        logging.FileHandler(logs_dir / "ytmusicbot.log", encoding="utf-8"),
     ],
 )
 

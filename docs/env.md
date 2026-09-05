@@ -16,3 +16,6 @@ YTDLP_COOKIES_FROM_BROWSER=chrome # optional local alternative: chrome, edge, or
 Set only one cookie option. `YTDLP_COOKIE_FILE` takes precedence and is
 recommended for a long-running bot. Keep the cookie file outside this repository
 because it contains account credentials.
+
+For production deployment, see the
+[Dokploy cookie setup guide](dokploy-cookies.md).

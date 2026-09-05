@@ -27,8 +27,8 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --chown=appuser:appuser ytmusicbot/ ./ytmusicbot/
 COPY --chown=appuser:appuser random_songs_config.json ./
 
-RUN mkdir -p cache logs random_songs \
-    && chown -R appuser:appuser cache logs random_songs
+RUN mkdir -p cache logs random_songs secrets \
+    && chown -R appuser:appuser cache logs random_songs secrets
 
 USER appuser
 

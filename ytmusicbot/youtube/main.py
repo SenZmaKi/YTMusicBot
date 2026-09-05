@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 import urllib.parse
 from typing import Any, Generator, NamedTuple, NotRequired, TypedDict
@@ -336,7 +337,11 @@ if shutil.which("node"):
 # A Netscape-format file is preferable for servers; browser extraction is
 # convenient for local development.
 if cookie_file := os.getenv("YTDLP_COOKIE_FILE"):
-    opts["cookiefile"] = str(Path(cookie_file).expanduser())
+    cookie_source = Path(cookie_file).expanduser()
+    runtime_cookie_file = Path(tempfile.gettempdir()) / "ytmusicbot-youtube-cookies.txt"
+    shutil.copyfile(cookie_source, runtime_cookie_file)
+    runtime_cookie_file.chmod(0o600)
+    opts["cookiefile"] = str(runtime_cookie_file)
 elif cookie_browser := os.getenv("YTDLP_COOKIES_FROM_BROWSER"):
     opts["cookiesfrombrowser"] = (cookie_browser, None, None, None)
 

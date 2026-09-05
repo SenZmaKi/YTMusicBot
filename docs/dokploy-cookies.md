@@ -103,6 +103,11 @@ Open the YTMusicBot application in Dokploy, then:
 File mounts are intended for individual configuration files and persist across
 deployments. See the [Dokploy mount documentation](https://docs.dokploy.com/docs/core/applications/advanced#volumesmounts).
 
+Dokploy may expose the mounted file as root-owned or read-only to the non-root
+application user. At startup, YTMusicBot copies it to a private writable file in
+the container's temporary directory because yt-dlp updates its cookie jar while
+running. The original mounted file remains unchanged.
+
 ## 3. Configure the environment
 
 In the application's **Environment** section, add:

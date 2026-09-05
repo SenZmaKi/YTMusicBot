@@ -162,8 +162,10 @@ and generated random-song data should survive deployments. This bot is a
 long-running worker and does not expose an HTTP port.
 
 If YouTube requires authentication, follow the
-[Dokploy cookie setup guide](docs/dokploy-cookies.md) to securely mount a
-Netscape cookie file and configure `YTDLP_COOKIE_FILE`.
+[YouTube cookie deployment guide](docs/youtube-cookies.md) to securely export,
+test, and mount a Netscape cookie file. The guide includes Dokploy-specific
+mount settings and explains permissions, JavaScript runtimes, and server-IP
+limitations.
 
 ## Testing
 
